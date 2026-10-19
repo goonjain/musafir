@@ -32,7 +32,24 @@ const SEED: Report[] = [
 const NAV: [string, string][] = [["planner", "Planner"], ["forecast", "Forecast"], ["gems", "Hidden gems"], ["map", "Live map"], ["pulse", "Pulse"], ["rewards", "Rewards"]];
 
 function Index() {
-  const [plan, setPlan] = useState<Plan>({ day: "Sun", time: "full", budget: 2000, interests: ["heritage", "photography"], type: "friends", crowd: "avoid", must: "amber" });
+  const [plan, setPlan] = useState<Plan>({
+    day: "Sun",
+    time: "full",
+    budget: 2000,
+    interests: ["heritage", "photography"],
+    type: "friends",
+    crowd: "avoid",
+    must: "amber",
+    mustVisits: ["amber"],
+    fromDate: "2026-10-18",
+    fromTime: "09:00",
+    toDate: "2026-10-18",
+    toTime: "19:00",
+    foodInterests: ["thali"],
+    dietary: ["vegetarian"],
+    pacePreference: "balanced",
+    notes: "",
+  });
   const [shown, setShown] = useState(false);
   const [optimized, setOptimized] = useState(false);
   const [points, setPoints] = useState(40);
@@ -95,8 +112,8 @@ function Index() {
         <img src={hero} alt="Hawa Mahal at sunrise, Jaipur" width={1600} height={912} className="absolute inset-0 h-full w-full object-cover" />
         <div className="absolute inset-0 bg-gradient-to-r from-indigo-deep/90 via-indigo-deep/55 to-transparent" />
         <div className="relative mx-auto w-full max-w-7xl px-4 text-primary-foreground">
-          <p className="font-display text-xl text-gold">पधारो म्हारे देस · Welcome to the Pink City</p>
-          <h1 className="mt-3 max-w-3xl text-5xl leading-tight md:text-7xl">Same city, same day. <span className="text-saffron">Half the crowd.</span></h1>
+          <p className="font-display text-xl text-gold">खम्मा घणी · पधारो म्हारे देस      </p>
+          <h1 className="mt-3 max-w-13xl text-8xl leading-tight md:text-7xl text-gold">   <span className="text-saffron">Welcome to the Pink City </span></h1>
           <p className="mt-5 max-w-xl text-lg opacity-90">Musafir predicts crowd pressure across Jaipur and redirects you to hidden gems that match your vibe — from Amber Fort mornings to quiet stepwells.</p>
           <button onClick={() => go("planner")} className="mt-8 rounded-full bg-primary px-8 py-3.5 font-display text-lg shadow-xl transition hover:scale-105 hover:bg-saffron">Plan my Jaipur day</button>
           <div className="mt-12 flex flex-wrap gap-8 text-sm">
@@ -147,7 +164,16 @@ function Index() {
               reports={reports}
               selectedPlaceId={selectedMapPlaceId}
               focusKey={mapFocusKey}
-              onOptimize={(id) => { setPlan({ ...plan, must: id }); setShown(true); setOptimized(false); setTimeout(() => go("itinerary"), 50); }}
+              onOptimize={(id) => {
+                setPlan((prev) => ({
+                  ...prev,
+                  must: id,
+                  mustVisits: [id, ...(prev.mustVisits?.filter((x) => x !== id) ?? [])],
+                }));
+                setShown(true);
+                setOptimized(false);
+                setTimeout(() => go("itinerary"), 50);
+              }}
             />
           </div>
         </section>
