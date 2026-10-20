@@ -7,6 +7,7 @@ import {
 } from "@/components/musafir/Sections";
 import { byId } from "@/lib/jaipur-data";
 import { applyStopReplacement, removeStopReplacement } from "@/lib/recommendation";
+import { PopularSpotsGraph } from "@/components/musafir/PopularSpotsGraph";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -155,6 +156,8 @@ function Index() {
             onRemoveFromRoute={handleRemoveFromRoute}
           />
         </section>
+        {/* Popular Tourist Spots Graph */}
+        <PopularSpotsGraph />
 
         <section id="map" className="scroll-mt-20 bg-secondary/60 py-20">
           <div className="mx-auto max-w-7xl px-4">
@@ -198,7 +201,7 @@ function Index() {
       <footer className="bg-indigo-deep py-10 text-center text-primary-foreground">
         <div className="border-bandhani mb-8" />
         <p className="font-display text-2xl text-gold">मुसाफ़िर</p>
-        <p className="mt-2 text-sm opacity-75">Built for HackPulse by Ashwajeet Sharma, Alice Sharma, Goon Jain & Paridhi Poddar</p>
+        <p className="mt-2 text-sm opacity-75">Built  by Aditya Vinayak Singh, Alice Sharma, Goon Jain & Paridhi Poddar</p>
         <p className="mt-1 text-xs opacity-50">Prototype demo — crowd values are simulated.</p>
       </footer>
 

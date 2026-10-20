@@ -1,0 +1,13 @@
+{
+  "source": "Government of Rajasthan, Economic Review 2025–26, Table 6.2",
+  "data": [
+    {"id":"hawa","year":2024,"domesticVisitors":1467000},
+    {"id":"hawa","year":2025,"domesticVisitors":1824000},
+    {"id":"amber","year":2024,"domesticVisitors":1604000},
+    {"id":"amber","year":2025,"domesticVisitors":1815000},
+    {"id":"nahargarh","year":2024,"domesticVisitors":1021000},
+    {"id":"nahargarh","year":2025,"domesticVisitors":1222000},
+    {"id":"jantar","year":2024,"domesticVisitors":981000},
+    {"id":"jantar","year":2025,"domesticVisitors":1163000}
+  ]
+}
