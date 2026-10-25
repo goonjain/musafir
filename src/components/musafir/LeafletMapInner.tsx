@@ -4,11 +4,11 @@ import L from "leaflet";
 import {
   PLACES,
   byId,
-  crowdScore,
   level,
   levelClass,
   type Place,
 } from "@/lib/jaipur-data";
+import { predictCrowd, type VerifiedObservation } from "@/lib/crowd-service";
 
 export interface SearchResult {
   place_id: number;
@@ -130,7 +130,9 @@ export interface LeafletMapInnerProps {
   setFlyZoom: (zoom: number) => void;
   userLocation: [number, number] | null;
   selectedSearchResult: SearchResult | null;
-  pulseAdj: Record<string, number>;
+  pulseAdj?: Record<string, number>;
+  observations?: VerifiedObservation[];
+  adminOverrides?: Record<string, number>;
   onOptimize: (id: string) => void;
 }
 
@@ -145,6 +147,8 @@ export default function LeafletMapInner({
   userLocation,
   selectedSearchResult,
   pulseAdj,
+  observations,
+  adminOverrides,
   onOptimize,
 }: LeafletMapInnerProps) {
   return (
@@ -195,15 +199,17 @@ export default function LeafletMapInner({
         </Marker>
       )}
 
-      {/* 16 Jaipur Place Markers with Musafir Intelligence */}
+      {/* 16 Jaipur Place Markers with Raahi Unified Crowd Intelligence */}
       {PLACES.map((p) => {
-        const s = crowdScore(
-          p,
-          { day: "Sun", hour, festival: false, weather: "clear" },
-          pulseAdj[p.id] ?? 0
-        ).score;
+        const pred = predictCrowd(p.id, {
+          day: "Sun",
+          hour,
+          observations,
+          adminOverrideDelta: adminOverrides?.[p.id] ?? (pulseAdj?.[p.id] ?? 0),
+        });
+        const s = pred.score;
         const isSelected = sel?.id === p.id;
-        const lvl = level(s);
+        const lvl = pred.category;
 
         return (
           <Marker
@@ -219,7 +225,7 @@ export default function LeafletMapInner({
             }}
           >
             <Popup>
-              <div className="p-3 space-y-2 min-w-[210px]">
+              <div className="p-3 space-y-2 min-w-[220px]">
                 <div>
                   <p className="font-display text-xs text-saffron">{p.hindi}</p>
                   <h4 className="font-bold text-base text-foreground leading-tight">
@@ -227,11 +233,20 @@ export default function LeafletMapInner({
                   </h4>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 flex-wrap">
                   <span
                     className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${levelClass[lvl]}`}
                   >
                     {lvl} · {s}/100
+                  </span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-medium border ${
+                      pred.predictionType === "observed"
+                        ? "bg-emerald-500/15 text-emerald-800 border-emerald-500/30"
+                        : "bg-amber-500/15 text-amber-800 border-amber-500/30"
+                    }`}
+                  >
+                    {pred.predictionType === "observed" ? "● Observed" : "○ Estimated"}
                   </span>
                   {p.gem && s < 40 && (
                     <span className="rounded-full bg-gem px-2 py-0.5 text-[10px] font-bold text-primary-foreground">
@@ -241,11 +256,17 @@ export default function LeafletMapInner({
                 </div>
 
                 <p className="text-xs text-muted-foreground">
-                  🕘 Best: <b>{p.best}</b>
+                  🕘 Best window: <b>{p.best}</b>
                 </p>
 
-                {p.alternatives && p.alternatives.length > 0 && p.alternatives[0] && (
+                {pred.evidence.dataFreshnessMinutes && (
                   <p className="text-[11px] text-muted-foreground">
+                    Freshness: {pred.evidence.dataFreshnessMinutes}m ago
+                  </p>
+                )}
+
+                {p.alternatives && p.alternatives.length > 0 && (
+                  <p className="text-[11px] text-muted-foreground pt-1 border-t">
                     Quieter alternative:{" "}
                     <button
                       onClick={() => {

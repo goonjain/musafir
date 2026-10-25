@@ -15,3 +15,25 @@ describe("App routing", () => {
     expect(matches.at(-1)?.routeId).not.toBe(rootRouteId);
   });
 });
+
+describe("LiveMap Component", () => {
+  it("renders LiveMap and alternative destinations without ReferenceError", async () => {
+    const React = await import("react");
+    const { renderToString } = await import("react-dom/server");
+    const { LiveMap } = await import("@/components/musafir/LiveMap");
+
+    const html = renderToString(
+      React.createElement(LiveMap, {
+        onOptimize: () => {},
+        pulseAdj: {},
+        reports: [],
+        observations: [],
+        adminOverrides: {},
+      }),
+    );
+
+    expect(html).toBeDefined();
+    expect(typeof html).toBe("string");
+    expect(html).toContain("Amber Fort");
+  });
+});

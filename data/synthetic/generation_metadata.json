@@ -1,0 +1,188 @@
+{
+  "dataset_name": "Raahi Jaipur Synthetic Crowd Congestion Dataset",
+  "dataset_version": "v1.0",
+  "data_source": "synthetic_simulation",
+  "generator_script": "ml/generate_dataset.py",
+  "random_seed": 42,
+  "generated_at": "2026-10-19T15:27:05.328317",
+  "temporal_range": {
+    "start_date": "2025-01-01",
+    "end_date": "2025-12-31",
+    "total_days": 365,
+    "total_hours_per_day": 24,
+    "total_destination_hours": 8760
+  },
+  "spatial_scope": {
+    "city": "Jaipur, Rajasthan",
+    "total_destinations": 16,
+    "destination_ids": [
+      "amber",
+      "jaigarh",
+      "panna",
+      "nahargarh",
+      "jalmahal",
+      "kanak",
+      "hawa",
+      "jantar",
+      "citypalace",
+      "albert",
+      "patrika",
+      "bapu",
+      "tripolia",
+      "anokhi",
+      "sisodia",
+      "sanganer"
+    ]
+  },
+  "total_records": 140160,
+  "feature_schema": {
+    "record_id": {
+      "type": "string",
+      "description": "Deterministic unique record key (e.g. amber_20250101_00)"
+    },
+    "timestamp": {
+      "type": "string (ISO 8601)",
+      "description": "Local observation hour in Asia/Kolkata (IST = UTC+5:30)"
+    },
+    "destination_id": {
+      "type": "string",
+      "description": "Canonical Jaipur destination identifier"
+    },
+    "hour": {
+      "type": "integer [0, 23]",
+      "description": "Hour of day"
+    },
+    "day_of_week": {
+      "type": "integer [0, 6]",
+      "description": "Day of week (0=Sunday, 1=Monday ... 6=Saturday)"
+    },
+    "is_weekend": {
+      "type": "integer [0, 1]",
+      "description": "1 if Saturday or Sunday, else 0"
+    },
+    "month": {
+      "type": "integer [1, 12]",
+      "description": "Month of year"
+    },
+    "is_holiday": {
+      "type": "integer [0, 1]",
+      "description": "1 if Rajasthan gazetted public holiday, else 0"
+    },
+    "is_festival": {
+      "type": "integer [0, 1]",
+      "description": "1 if major Jaipur cultural festival/event active, else 0"
+    },
+    "event_intensity": {
+      "type": "float [0.0, 1.0]",
+      "description": "Calibrated crowd surge multiplier for festivals"
+    },
+    "temperature": {
+      "type": "float",
+      "description": "Simulated ambient temperature in Celsius"
+    },
+    "rain_probability": {
+      "type": "float [0.0, 1.0]",
+      "description": "Simulated hourly rain probability"
+    },
+    "weather_condition": {
+      "type": "string",
+      "description": "Categorical condition: clear, hot, rain, overcast, haze"
+    },
+    "capacity_estimate": {
+      "type": "integer",
+      "description": "Assumed safe hourly venue throughput based on monument footprint"
+    },
+    "popularity_factor": {
+      "type": "integer [10, 70]",
+      "description": "Heuristic baseline popularity prior"
+    },
+    "previous_hour_occupancy": {
+      "type": "float or null",
+      "description": "Occupancy percent at T-1 hour for destination (Strictly zero target leakage)"
+    },
+    "previous_day_same_hour": {
+      "type": "float or null",
+      "description": "Occupancy percent at T-24 hours for destination (Strictly zero target leakage)"
+    },
+    "occupancy_percent": {
+      "type": "float [0.0, 100.0]",
+      "description": "Venue capacity utilization percentage"
+    },
+    "crowd_score": {
+      "type": "integer [5, 99]",
+      "description": "Raahi canonical relative congestion index"
+    },
+    "crowd_category": {
+      "type": "string",
+      "description": "Low (<=34), Moderate (35-59), High (60-79), Critical (>=80)"
+    },
+    "data_source": {
+      "type": "string",
+      "description": "Constant 'synthetic_simulation'"
+    },
+    "dataset_version": {
+      "type": "string",
+      "description": "Constant 'v1.0'"
+    }
+  },
+  "crowd_category_thresholds": {
+    "LOW_MAX": 34,
+    "MODERATE_MAX": 59,
+    "HIGH_MAX": 79,
+    "CRITICAL_MIN": 80
+  },
+  "summary_statistics": {
+    "category_distribution": {
+      "Low": {
+        "count": 95114,
+        "percent": 67.86
+      },
+      "Moderate": {
+        "count": 23228,
+        "percent": 16.57
+      },
+      "High": {
+        "count": 12664,
+        "percent": 9.04
+      },
+      "Critical": {
+        "count": 9154,
+        "percent": 6.53
+      }
+    },
+    "crowd_score": {
+      "min": 5,
+      "max": 99,
+      "mean": 25.5,
+      "median": 5,
+      "std": 27.94
+    },
+    "occupancy_percent": {
+      "min": 0.0,
+      "max": 98.8,
+      "mean": 22.5,
+      "median": 0.0,
+      "std": 29.66
+    }
+  },
+  "files_generated": [
+    {
+      "filename": "jaipur_crowd_v1.csv",
+      "format": "CSV",
+      "bytes": 19829007,
+      "records": 140160
+    },
+    {
+      "filename": "jaipur_crowd_v1.json",
+      "format": "JSON",
+      "bytes": 77856535,
+      "records": 140160
+    },
+    {
+      "filename": "generation_metadata.json",
+      "format": "JSON",
+      "bytes": 0
+    }
+  ],
+  "disclaimer": "This dataset was synthetically generated for ML pipeline prototyping and algorithm benchmarking in the Raahi crowd intelligence platform. Hourly values simulate behavioral trends, opening hours, weather sensitivities, and festival surges. They DO NOT represent verified ground-truth sensor telemetry."
+}

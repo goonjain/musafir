@@ -3,7 +3,6 @@
 @import "tw-animate-css";
 @import "leaflet/dist/leaflet.css";
 
-
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -76,18 +75,33 @@
 }
 
 @layer base {
-  * { border-color: var(--color-border); }
+  * {
+    border-color: var(--color-border);
+  }
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
   }
-  h1, h2, h3 { font-family: var(--font-serif); }
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-serif);
+  }
 }
 
 @utility jaali {
-  background-image: radial-gradient(circle at 50% 50%, color-mix(in oklab, var(--primary) 14%, transparent) 2px, transparent 2.5px),
-    radial-gradient(circle at 0 0, color-mix(in oklab, var(--saffron) 12%, transparent) 2px, transparent 2.5px);
+  background-image:
+    radial-gradient(
+      circle at 50% 50%,
+      color-mix(in oklab, var(--primary) 14%, transparent) 2px,
+      transparent 2.5px
+    ),
+    radial-gradient(
+      circle at 0 0,
+      color-mix(in oklab, var(--saffron) 12%, transparent) 2px,
+      transparent 2.5px
+    );
   background-size: 22px 22px;
 }
 
@@ -96,7 +110,13 @@
 }
 
 @utility border-bandhani {
-  background-image: repeating-linear-gradient(90deg, var(--primary) 0 12px, var(--saffron) 12px 24px, var(--gold) 24px 36px, var(--indigo-deep) 36px 48px);
+  background-image: repeating-linear-gradient(
+    90deg,
+    var(--primary) 0 12px,
+    var(--saffron) 12px 24px,
+    var(--gold) 24px 36px,
+    var(--indigo-deep) 36px 48px
+  );
   height: 6px;
 }
 
@@ -110,7 +130,9 @@
   color: var(--color-foreground, #222);
   border-radius: 1rem;
   border: 1px solid var(--color-border);
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  box-shadow:
+    0 10px 25px -5px rgba(0, 0, 0, 0.1),
+    0 8px 10px -6px rgba(0, 0, 0, 0.1);
   padding: 0;
   overflow: hidden;
 }
@@ -161,4 +183,3 @@
   background: rgba(37, 99, 235, 0.4);
   animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
-

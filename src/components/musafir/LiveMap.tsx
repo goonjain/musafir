@@ -2,11 +2,11 @@ import React, { useEffect, useState, Suspense } from "react";
 import {
   PLACES,
   byId,
-  crowdScore,
   level,
   levelClass,
   type Place,
 } from "@/lib/jaipur-data";
+import { predictCrowd, type VerifiedObservation } from "@/lib/crowd-service";
 import type { Report } from "@/components/musafir/Sections";
 import type { SearchResult } from "./LeafletMapInner";
 
@@ -14,14 +14,22 @@ import type { SearchResult } from "./LeafletMapInner";
 const LeafletMapInner = React.lazy(() => import("./LeafletMapInner"));
 
 interface LiveMapProps {
-  pulseAdj: Record<string, number>;
-  reports: Report[];
+  pulseAdj?: Record<string, number>;
+  reports?: Report[];
+  observations?: VerifiedObservation[];
+  adminOverrides?: Record<string, number>;
   onOptimize: (id: string) => void;
   selectedPlaceId?: string | null;
   focusKey?: number;
 }
 
-export function LiveMap({ pulseAdj, reports, onOptimize, selectedPlaceId, focusKey }: LiveMapProps) {
+export function LiveMap({
+  pulseAdj = {},
+  reports = [],
+  observations = [],
+  adminOverrides = {},
+  onOptimize,
+}: LiveMapProps) {
   // Client-side mounted state for SSR safety
   const [mounted, setMounted] = useState(false);
   const [hour, setHour] = useState(16);
@@ -363,6 +371,8 @@ export function LiveMap({ pulseAdj, reports, onOptimize, selectedPlaceId, focusK
                   userLocation={userLocation}
                   selectedSearchResult={selectedSearchResult}
                   pulseAdj={pulseAdj}
+                  observations={observations}
+                  adminOverrides={adminOverrides}
                   onOptimize={onOptimize}
                 />
               </Suspense>
@@ -386,7 +396,7 @@ export function LiveMap({ pulseAdj, reports, onOptimize, selectedPlaceId, focusK
                   </div>
 
                   <span className="text-[11px] font-semibold text-muted-foreground">
-                    Live Jaipur Map
+                    Raahi Live Map
                   </span>
                 </div>
 
@@ -412,16 +422,18 @@ export function LiveMap({ pulseAdj, reports, onOptimize, selectedPlaceId, focusK
           )}
         </div>
 
-        {/* Selected Place Musafir Intelligence Card */}
+        {/* Selected Place Raahi Intelligence Card */}
         {sel &&
           (() => {
-            const s = crowdScore(
-              sel,
-              { day: "Sun", hour, festival: false, weather: "clear" },
-              pulseAdj[sel.id] ?? 0
-            ).score;
-            const lvl = level(s);
-            const last = reports.find((r) => r.place === sel.id);
+            const pred = predictCrowd(sel.id, {
+              day: "Sun",
+              hour,
+              observations,
+              adminOverrideDelta: adminOverrides[sel.id] ?? (pulseAdj[sel.id] ?? 0),
+            });
+            const s = pred.score;
+            const lvl = pred.category;
+            const last = reports.find((r) => r.place === sel.id || (r as any).destinationId === sel.id);
 
             return (
               <div
@@ -451,12 +463,27 @@ export function LiveMap({ pulseAdj, reports, onOptimize, selectedPlaceId, focusK
                     >
                       {lvl} Crowd · {s}/100
                     </span>
+                    <span
+                      className={`rounded-full px-2.5 py-0.5 text-xs font-semibold border ${
+                        pred.predictionType === "observed"
+                          ? "bg-emerald-500/15 text-emerald-800 border-emerald-500/30"
+                          : "bg-amber-500/15 text-amber-800 border-amber-500/30"
+                      }`}
+                    >
+                      {pred.predictionType === "observed" ? "● Verified Observation" : "○ Baseline v1.0"}
+                    </span>
                     {sel.gem && (
                       <span className="rounded-full bg-gem px-3 py-1 text-xs font-bold text-primary-foreground">
                         💎 Hidden Gem
                       </span>
                     )}
                   </div>
+
+                  {pred.evidence.dataFreshnessMinutes && (
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Freshness: {pred.evidence.dataFreshnessMinutes}m ago
+                    </p>
+                  )}
 
                   <div className="mt-5 space-y-2 border-t pt-4 text-sm">
                     <p>
@@ -473,7 +500,7 @@ export function LiveMap({ pulseAdj, reports, onOptimize, selectedPlaceId, focusK
                   {sel.alternatives && sel.alternatives.length > 0 && (
                     <div className="mt-4 rounded-xl border border-saffron/30 bg-amber-500/5 p-3.5">
                       <p className="text-xs font-bold uppercase tracking-wide text-saffron">
-                        Musafir Smart Recommendation
+                        Raahi Smart Recommendation
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
                         Lower-crowd alternative nearby:
@@ -481,11 +508,16 @@ export function LiveMap({ pulseAdj, reports, onOptimize, selectedPlaceId, focusK
                       <div className="mt-2 flex flex-wrap gap-2">
                         {sel.alternatives.map((a) => {
                           const altPlace = byId(a);
-                          const altScore = crowdScore(
-                            altPlace,
-                            { day: "Sun", hour, festival: false, weather: "clear" },
-                            pulseAdj[altPlace.id] ?? 0
-                          ).score;
+                          if (!altPlace) return null;
+                          const altPred = predictCrowd(altPlace.id, {
+                            day: "Sun",
+                            hour,
+                            festival: false,
+                            weather: "clear",
+                            activeObservations: observations,
+                            adminOverrides,
+                          });
+                          const altScore = altPred.score;
                           return (
                             <button
                               key={a}
@@ -498,7 +530,7 @@ export function LiveMap({ pulseAdj, reports, onOptimize, selectedPlaceId, focusK
                             >
                               <span>{altPlace.name}</span>
                               <span
-                                className={`text-[10px] px-1.5 py-0.5 rounded-full ${levelClass[level(altScore)]}`}
+                                className={`text-[10px] px-1.5 py-0.5 rounded-full ${levelClass[altPred.level]}`}
                               >
                                 {altScore}/100
                               </span>

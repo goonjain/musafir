@@ -10,30 +10,49 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+<<<<<<< HEAD
 import { Route as ApiOfficialVisitsRouteImport } from './routes/api/official-visits'
+=======
+import { Route as AdminRouteImport } from './routes/admin'
+>>>>>>> origin/main
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+<<<<<<< HEAD
 const ApiOfficialVisitsRoute = ApiOfficialVisitsRouteImport.update({
   id: '/api/official-visits',
   path: '/api/official-visits',
+=======
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+>>>>>>> origin/main
   getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+<<<<<<< HEAD
   '/api/official-visits': typeof ApiOfficialVisitsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/api/official-visits': typeof ApiOfficialVisitsRoute
+=======
+  '/admin': typeof AdminRoute
+}
+export interface FileRoutesByTo {
+  '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
+>>>>>>> origin/main
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+<<<<<<< HEAD
   '/api/official-visits': typeof ApiOfficialVisitsRoute
 }
 export interface FileRouteTypes {
@@ -42,11 +61,25 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to: '/' | '/api/official-visits'
   id: '__root__' | '/' | '/api/official-visits'
+=======
+  '/admin': typeof AdminRoute
+}
+export interface FileRouteTypes {
+  fileRoutesByFullPath: FileRoutesByFullPath
+  fullPaths: '/' | '/admin'
+  fileRoutesByTo: FileRoutesByTo
+  to: '/' | '/admin'
+  id: '__root__' | '/' | '/admin'
+>>>>>>> origin/main
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+<<<<<<< HEAD
   ApiOfficialVisitsRoute: typeof ApiOfficialVisitsRoute
+=======
+  AdminRoute: typeof AdminRoute
+>>>>>>> origin/main
 }
 
 declare module '@tanstack/react-router' {
@@ -58,11 +91,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+<<<<<<< HEAD
     '/api/official-visits': {
       id: '/api/official-visits'
       path: '/api/official-visits'
       fullPath: '/api/official-visits'
       preLoaderRoute: typeof ApiOfficialVisitsRouteImport
+=======
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+>>>>>>> origin/main
       parentRoute: typeof rootRouteImport
     }
   }
@@ -70,7 +111,11 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+<<<<<<< HEAD
   ApiOfficialVisitsRoute: ApiOfficialVisitsRoute,
+=======
+  AdminRoute: AdminRoute,
+>>>>>>> origin/main
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
