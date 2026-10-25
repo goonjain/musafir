@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import hero from "@/assets/hero-jaipur.jpg";
 import {
   SectionTitle, Planner, Itinerary, Forecast, HiddenGems, LiveMap, Pulse, Extras,
@@ -7,6 +7,7 @@ import {
 } from "@/components/musafir/Sections";
 import { byId } from "@/lib/jaipur-data";
 import { applyStopReplacement, removeStopReplacement } from "@/lib/recommendation";
+import { api } from "@/lib/api";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -22,27 +23,75 @@ export const Route = createFileRoute("/")({
   component: Index,
 });
 
-const SEED: Report[] = [
-  { id: 1, place: "panna", user: "Riya", status: "Quiet", tip: "Only 5 people here, perfect symmetry shots!", ago: "6 min ago" },
-  { id: 2, place: "amber", user: "Kabir", status: "Busy", tip: "Elephant ride queue is huge, take the jeep.", ago: "12 min ago" },
-  { id: 3, place: "hawa", user: "Sophie", status: "Moderate", tip: "Wind View Café rooftop has the best angle.", ago: "25 min ago" },
-  { id: 4, place: "albert", user: "Arjun", status: "Quiet", tip: "Egyptian mummy gallery is empty.", ago: "40 min ago" },
+const NAV: [string, string][] = [
+  ["planner", "Planner"],
+  ["forecast", "Forecast"],
+  ["gems", "Hidden gems"],
+  ["map", "Live map"],
+  ["pulse", "Pulse"],
+  ["rewards", "Rewards"],
 ];
 
-const NAV: [string, string][] = [["planner", "Planner"], ["forecast", "Forecast"], ["gems", "Hidden gems"], ["map", "Live map"], ["pulse", "Pulse"], ["rewards", "Rewards"]];
+function computeAdjustments(reps: Report[]): Record<string, number> {
+  const adj: Record<string, number> = {};
+  for (const r of reps) {
+    const p = r.place || r.destination_id;
+    if (p && !(p in adj)) {
+      const s = r.status || r.crowd_level;
+      adj[p] = s === "Busy" ? 15 : s === "Packed" ? 25 : s === "Quiet" ? -15 : 0;
+    }
+  }
+  return adj;
+}
 
 function Index() {
-  const [plan, setPlan] = useState<Plan>({ day: "Sun", time: "full", budget: 2000, interests: ["heritage", "photography"], type: "friends", crowd: "avoid", must: "amber" });
+  const [plan, setPlan] = useState<Plan>({
+    day: "Sun",
+    time: "full",
+    budget: 2000,
+    interests: ["heritage", "photography"],
+    type: "friends",
+    crowd: "avoid",
+    must: "amber",
+  });
   const [shown, setShown] = useState(false);
   const [optimized, setOptimized] = useState(false);
-  const [points, setPoints] = useState(40);
-  const [reports, setReports] = useState<Report[]>(SEED);
+  const [points, setPoints] = useState(0);
+  const [reports, setReports] = useState<Report[]>([]);
+  const [loadingReports, setLoadingReports] = useState(true);
+  const [reportsError, setReportsError] = useState<string | null>(null);
   const [pulseAdj, setPulseAdj] = useState<Record<string, number>>({});
   const [toast, setToast] = useState<string | null>(null);
 
   // Stage 2: Map focus and destination selection state
   const [selectedMapPlaceId, setSelectedMapPlaceId] = useState<string | null>(null);
   const [mapFocusKey, setMapFocusKey] = useState<number>(0);
+
+  const fetchReports = async () => {
+    setLoadingReports(true);
+    setReportsError(null);
+    const res = await api.getReports();
+    if (res.data?.reports) {
+      setReports(res.data.reports as Report[]);
+      setPulseAdj(computeAdjustments(res.data.reports as Report[]));
+      setReportsError(null);
+    } else {
+      setReportsError(res.error || "Unable to connect to community backend database.");
+    }
+    setLoadingReports(false);
+  };
+
+  const fetchRewards = async () => {
+    const res = await api.getRewardBalance();
+    if (res.data) {
+      setPoints(res.data.total_points);
+    }
+  };
+
+  useEffect(() => {
+    fetchReports();
+    fetchRewards();
+  }, []);
 
   const reward = (n: number, msg = `+${n} Musafir points!`) => {
     setPoints((p) => p + n);
@@ -78,15 +127,85 @@ function Index() {
     setTimeout(() => setToast(null), 2000);
   };
 
+  const handleSubmitReport = async (payload: {
+    destination_id: string;
+    crowd_level: "Quiet" | "Moderate" | "Busy" | "Packed";
+    vs_forecast?: "Quieter" | "About right" | "Busier";
+    wait_minutes?: number;
+    tip?: string;
+    image?: string;
+    user_name?: string;
+  }) => {
+    const res = await api.submitReport(payload);
+    if (res.data && res.data.success) {
+      setReports((prev) => [res.data!.report as Report, ...prev]);
+      setPoints(res.data.total_points);
+      const shift =
+        payload.crowd_level === "Busy"
+          ? 15
+          : payload.crowd_level === "Packed"
+          ? 25
+          : payload.crowd_level === "Quiet"
+          ? -15
+          : 0;
+      setPulseAdj((a) => ({ ...a, [payload.destination_id]: shift }));
+      setToast(res.data.message || `Check-in shared · +${res.data.points_awarded} pts!`);
+      setTimeout(() => setToast(null), 2500);
+      return { success: true, message: res.data.message };
+    }
+    return { success: false, error: res.error || "Check-in failed" };
+  };
+
+  const handleVoteAccuracy = async (reportId: number) => {
+    const res = await api.voteAccuracy(reportId, 1);
+    if (res.data?.success) {
+      setReports((prev) =>
+        prev.map((r) =>
+          r.id === reportId
+            ? {
+                ...r,
+                accuracy_votes_count: (r.accuracy_votes_count || 0) + 1,
+                trust_weight: res.data!.trust_weight,
+              }
+            : r
+        )
+      );
+      setToast("Accuracy verified! Trust weight updated.");
+      setTimeout(() => setToast(null), 2200);
+    } else if (res.error) {
+      setToast(res.error);
+      setTimeout(() => setToast(null), 2200);
+    }
+  };
+
+  const handleFlagReport = async (reportId: number) => {
+    const res = await api.flagReport(reportId);
+    if (res.data?.success) {
+      setReports((prev) =>
+        prev.map((r) => (r.id === reportId ? { ...r, moderation_status: "flagged" } : r))
+      );
+      setToast("Report flagged for moderation review.");
+      setTimeout(() => setToast(null), 2200);
+    }
+  };
+
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-40 border-b bg-background/85 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center gap-6 px-4 py-3">
-          <button onClick={() => go("top")} className="font-display text-2xl text-primary">मुसाफ़िर <span className="text-base text-foreground">Musafir</span></button>
+          <button onClick={() => go("top")} className="font-display text-2xl text-primary">
+            मुसाफ़िर <span className="text-base text-foreground">Musafir</span>
+          </button>
           <nav className="hidden flex-1 justify-center gap-5 text-sm md:flex">
-            {NAV.map(([id, l]) => <button key={id} onClick={() => go(id)} className="hover:text-primary">{l}</button>)}
+            {NAV.map(([id, l]) => (
+              <button key={id} onClick={() => go(id)} className="hover:text-primary">
+                {l}
+              </button>
+            ))}
           </nav>
-          <span className="ml-auto rounded-full bg-gold px-3 py-1 text-sm font-bold text-foreground md:ml-0">🪙 {points}</span>
+          <span className="ml-auto rounded-full bg-gold px-3 py-1 text-sm font-bold text-foreground md:ml-0">
+            🪙 {points}
+          </span>
         </div>
         <div className="border-bandhani" />
       </header>
@@ -96,11 +215,22 @@ function Index() {
         <div className="absolute inset-0 bg-gradient-to-r from-indigo-deep/90 via-indigo-deep/55 to-transparent" />
         <div className="relative mx-auto w-full max-w-7xl px-4 text-primary-foreground">
           <p className="font-display text-xl text-gold">पधारो म्हारे देस · Welcome to the Pink City</p>
-          <h1 className="mt-3 max-w-3xl text-5xl leading-tight md:text-7xl">Same city, same day. <span className="text-saffron">Half the crowd.</span></h1>
-          <p className="mt-5 max-w-xl text-lg opacity-90">Musafir predicts crowd pressure across Jaipur and redirects you to hidden gems that match your vibe — from Amber Fort mornings to quiet stepwells.</p>
-          <button onClick={() => go("planner")} className="mt-8 rounded-full bg-primary px-8 py-3.5 font-display text-lg shadow-xl transition hover:scale-105 hover:bg-saffron">Plan my Jaipur day</button>
+          <h1 className="mt-3 max-w-3xl text-5xl leading-tight md:text-7xl">
+            Same city, same day. <span className="text-saffron">Half the crowd.</span>
+          </h1>
+          <p className="mt-5 max-w-xl text-lg opacity-90">
+            Musafir predicts crowd pressure across Jaipur and redirects you to hidden gems that match your vibe — from Amber Fort mornings to quiet stepwells.
+          </p>
+          <button onClick={() => go("planner")} className="mt-8 rounded-full bg-primary px-8 py-3.5 font-display text-lg shadow-xl transition hover:scale-105 hover:bg-saffron">
+            Plan my Jaipur day
+          </button>
           <div className="mt-12 flex flex-wrap gap-8 text-sm">
-            {[["428+ Cr", "domestic tourist visits, 2025"], ["16", "curated Jaipur places"], ["-45%", "crowd exposure on Smart Route"]].map(([a, b]) => <div key={b}><p className="font-serif text-3xl text-gold">{a}</p><p className="opacity-80">{b}</p></div>)}
+            {[["428+ Cr", "domestic tourist visits, 2025"], ["16", "curated Jaipur places"], ["-45%", "crowd exposure on Smart Route"]].map(([a, b]) => (
+              <div key={b}>
+                <p className="font-serif text-3xl text-gold">{a}</p>
+                <p className="opacity-80">{b}</p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
@@ -154,11 +284,15 @@ function Index() {
 
         <section id="pulse" className="mx-auto max-w-7xl scroll-mt-20 px-4 py-20">
           <SectionTitle kicker="Step 5 · समुदाय" title="Musafir Pulse" sub="Travellers on the ground keep the forecast honest." />
-          <Pulse reports={reports} addReport={(r) => {
-            setReports((rs) => [{ ...r, id: Date.now(), user: "You", ago: "just now" }, ...rs]);
-            setPulseAdj((a) => ({ ...a, [r.place]: r.status === "Busy" ? 15 : r.status === "Quiet" ? -15 : 0 }));
-            reward(20, "Check-in shared · +20 points!");
-          }} />
+          <Pulse
+            reports={reports}
+            loading={loadingReports}
+            error={reportsError}
+            onRetry={fetchReports}
+            onSubmitReport={handleSubmitReport}
+            onVoteAccuracy={handleVoteAccuracy}
+            onFlagReport={handleFlagReport}
+          />
         </section>
 
         <section id="rewards" className="scroll-mt-20 bg-secondary/60 py-20">

@@ -11,7 +11,10 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:backend": "pytest backend/tests/test_community.py",
+    "backend": "node backend/server.js",
+    "backend:py": "uvicorn backend.app.main:app --port 8000 --reload"
   },
   "overrides": {
     "rolldown": "1.2.1"

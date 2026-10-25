@@ -1,11 +1,33 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef } from "react";
 import {
   PLACES, byId, crowdScore, level, levelClass, DAYS, INTERESTS,
   type ForecastInput, type Place,
 } from "@/lib/jaipur-data";
 import { rankAlternatives, formatDistance } from "@/lib/recommendation";
 
-export type Report = { id: number; place: string; user: string; status: "Quiet" | "Moderate" | "Busy"; tip: string; ago: string };
+export type Report = {
+  id: number;
+  place?: string;
+  user?: string;
+  status?: "Quiet" | "Moderate" | "Busy" | "Packed";
+  tip?: string;
+  ago?: string;
+  destination_id?: string;
+  destination_name?: string;
+  user_id?: string;
+  user_name?: string;
+  crowd_level?: "Quiet" | "Moderate" | "Busy" | "Packed";
+  vs_forecast?: string;
+  wait_minutes?: number;
+  image?: string | null;
+  photo_url?: string | null;
+  observed_at?: string;
+  submitted_at?: string;
+  forecast_score_at_report?: number;
+  moderation_status?: "approved" | "pending" | "flagged" | "rejected";
+  trust_weight?: number;
+  accuracy_votes_count?: number;
+};
 
 export function SectionTitle({ kicker, title, sub }: { kicker: string; title: string; sub?: string }) {
   return (
@@ -516,37 +538,484 @@ export function HiddenGems({
 export { LiveMap } from "./LiveMap";
 
 
-/* ---------------- Pulse ---------------- */
-export function Pulse({ reports, addReport }: { reports: Report[]; addReport: (r: Omit<Report, "id" | "ago" | "user">) => void }) {
+/* ---------------- Pulse (Real Community Engine) ---------------- */
+export function Pulse({
+  reports,
+  addReport,
+  loading = false,
+  error = null,
+  onRetry,
+  onSubmitReport,
+  onVoteAccuracy,
+  onFlagReport,
+}: {
+  reports: Report[];
+  addReport?: (r: Omit<Report, "id" | "ago" | "user">) => void;
+  loading?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
+  onSubmitReport?: (payload: {
+    destination_id: string;
+    crowd_level: "Quiet" | "Moderate" | "Busy" | "Packed";
+    vs_forecast?: "Quieter" | "About right" | "Busier";
+    wait_minutes?: number;
+    tip?: string;
+    image?: string;
+    user_name?: string;
+  }) => Promise<{ success: boolean; message?: string; error?: string }>;
+  onVoteAccuracy?: (reportId: number) => Promise<void>;
+  onFlagReport?: (reportId: number) => Promise<void>;
+}) {
   const [place, setPlace] = useState("hawa");
-  const [status, setStatus] = useState<Report["status"]>("Quiet");
+  const [status, setStatus] = useState<"Quiet" | "Moderate" | "Busy" | "Packed">("Quiet");
+  const [vsForecast, setVsForecast] = useState<"Quieter" | "About right" | "Busier" | "">("");
+  const [waitMinutes, setWaitMinutes] = useState<string>("");
   const [tip, setTip] = useState("");
-  const tone = { Quiet: "bg-crowd-low", Moderate: "bg-crowd-moderate", Busy: "bg-crowd-critical" };
+  const [imageFile, setImageFile] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [userName, setUserName] = useState(() => (typeof window !== "undefined" ? localStorage.getItem("musafir_user_name") || "" : ""));
+  const [filterPlace, setFilterPlace] = useState<string>("all");
+  const [submitting, setSubmitting] = useState(false);
+  const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [votedSet, setVotedSet] = useState<Set<number>>(new Set());
+  const [flaggedSet, setFlaggedSet] = useState<Set<number>>(new Set());
+
+  const tone: Record<string, string> = {
+    Quiet: "bg-crowd-low",
+    Moderate: "bg-crowd-moderate",
+    Busy: "bg-crowd-high",
+    Packed: "bg-crowd-critical",
+  };
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setFeedback({ type: "error", text: "Please select an image file (JPEG, PNG, WEBP)." });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const MAX = 900;
+        let w = img.width;
+        let h = img.height;
+        if (w > h && w > MAX) {
+          h = Math.round((h * MAX) / w);
+          w = MAX;
+        } else if (h > MAX) {
+          w = Math.round((w * MAX) / h);
+          h = MAX;
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx?.drawImage(img, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
+        setImageFile(dataUrl);
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFeedback(null);
+    setSubmitting(true);
+
+    if (userName.trim() && typeof window !== "undefined") {
+      localStorage.setItem("musafir_user_name", userName.trim());
+    }
+
+    const payload = {
+      destination_id: place,
+      crowd_level: status,
+      vs_forecast: (vsForecast || undefined) as any,
+      wait_minutes: waitMinutes ? parseInt(waitMinutes, 10) : 0,
+      tip: tip.trim(),
+      image: imageFile || undefined,
+      user_name: userName.trim() || undefined,
+    };
+
+    if (onSubmitReport) {
+      const res = await onSubmitReport(payload);
+      setSubmitting(false);
+      if (res.success) {
+        setTip("");
+        setWaitMinutes("");
+        setImageFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        setFeedback({ type: "success", text: res.message || "Check-in persisted to database · +20 pts!" });
+      } else {
+        setFeedback({ type: "error", text: res.error || "Submission failed. Please try again." });
+      }
+    } else if (addReport) {
+      addReport({ place, status: status === "Packed" ? "Busy" : status, tip, image: imageFile });
+      setTip("");
+      setImageFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      setSubmitting(false);
+      setFeedback({ type: "success", text: "Check-in shared · +20 pts!" });
+    }
+  };
+
+  const handleVote = async (reportId: number) => {
+    if (votedSet.has(reportId)) return;
+    setVotedSet((prev) => new Set([...prev, reportId]));
+    if (onVoteAccuracy) {
+      await onVoteAccuracy(reportId);
+    }
+  };
+
+  const handleFlag = async (reportId: number) => {
+    if (flaggedSet.has(reportId)) return;
+    setFlaggedSet((prev) => new Set([...prev, reportId]));
+    if (onFlagReport) {
+      await onFlagReport(reportId);
+    }
+  };
+
+  const filteredReports = reports.filter((r) => {
+    if (filterPlace === "all") return true;
+    return (r.place || r.destination_id) === filterPlace;
+  });
+
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_1.4fr]">
-      <form onSubmit={(e) => { e.preventDefault(); addReport({ place, status, tip }); setTip(""); }} className="space-y-4 rounded-2xl border bg-card p-6">
-        <h3 className="text-2xl">I'm here right now</h3>
-        <select value={place} onChange={(e) => setPlace(e.target.value)} className="w-full rounded-lg border bg-background px-3 py-2">
-          {PLACES.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
-        <div className="grid grid-cols-3 gap-2">
-          {(["Quiet", "Moderate", "Busy"] as const).map((s) => <button type="button" key={s} onClick={() => setStatus(s)} className={`rounded-lg border-2 py-3 font-semibold ${status === s ? `${tone[s]} border-foreground text-primary-foreground` : "bg-background"}`}>{s}</button>)}
+      {/* Check-in Form Card */}
+      <form onSubmit={handleFormSubmit} className="space-y-4 rounded-2xl border bg-card p-6 shadow-sm">
+        <div className="flex items-center justify-between">
+          <h3 className="text-2xl font-semibold">I'm here right now</h3>
+          <span className="rounded-full bg-gold/20 px-2.5 py-0.5 text-xs font-bold text-foreground">Live check-in</span>
         </div>
-        <input value={tip} onChange={(e) => setTip(e.target.value)} maxLength={100} placeholder="One-line tip (optional)" className="w-full rounded-lg border bg-background px-3 py-2" />
-        <button className="w-full rounded-full bg-primary py-2.5 font-semibold text-primary-foreground hover:bg-saffron">Share check-in · +20 pts</button>
-        <p className="text-xs text-muted-foreground">Your check-in instantly adjusts the crowd forecast and live map.</p>
-      </form>
-      <div className="max-h-[420px] space-y-3 overflow-y-auto pr-1">
-        {reports.map((r) => (
-          <div key={r.id} className="flex gap-3 rounded-xl border bg-card p-4 animate-in fade-in slide-in-from-top-2">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-saffron font-display text-primary-foreground">{r.user[0]}</div>
-            <div className="flex-1">
-              <div className="flex flex-wrap items-center gap-2 text-sm"><b>{r.user}</b><span className="text-muted-foreground">at {byId(r.place).name} · {r.ago}</span>
-                <span className={`ml-auto rounded-full px-2 py-0.5 text-xs text-primary-foreground ${tone[r.status]}`}>{r.status}</span></div>
-              {r.tip && <p className="mt-1 text-sm">{r.tip}</p>}
-            </div>
+
+        {feedback && (
+          <div
+            className={`rounded-xl p-3 text-sm animate-in fade-in ${
+              feedback.type === "success"
+                ? "border border-gold/40 bg-gold/10 text-foreground font-medium"
+                : "border border-destructive/30 bg-destructive/10 text-destructive font-medium"
+            }`}
+          >
+            {feedback.type === "success" ? "🎉 " : "⚠ "}
+            {feedback.text}
           </div>
-        ))}
+        )}
+
+        <div>
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Select Destination</label>
+          <select value={place} onChange={(e) => setPlace(e.target.value)} className="w-full rounded-lg border bg-background px-3 py-2 text-sm font-medium">
+            {PLACES.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} ({p.hindi})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Crowd Condition</label>
+          <div className="grid grid-cols-4 gap-1.5">
+            {(["Quiet", "Moderate", "Busy", "Packed"] as const).map((s) => (
+              <button
+                type="button"
+                key={s}
+                onClick={() => setStatus(s)}
+                className={`rounded-lg border py-2.5 text-xs font-bold transition ${
+                  status === s ? `${tone[s]} border-foreground text-primary-foreground shadow-sm scale-102` : "border-border bg-background hover:border-primary/50"
+                }`}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Compared with Forecast (optional)</label>
+          <div className="grid grid-cols-3 gap-2">
+            {(["Quieter", "About right", "Busier"] as const).map((v) => (
+              <button
+                type="button"
+                key={v}
+                onClick={() => setVsForecast(vsForecast === v ? "" : v)}
+                className={`rounded-lg border py-1.5 text-xs font-medium transition ${
+                  vsForecast === v ? "border-primary bg-primary/10 text-primary font-bold" : "border-border bg-background hover:border-primary/40 text-muted-foreground"
+                }`}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Your Name (optional)</label>
+            <input
+              type="text"
+              value={userName}
+              onChange={(e) => setUserName(e.target.value)}
+              placeholder="e.g. Riya"
+              maxLength={40}
+              className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Wait (mins)</label>
+            <input
+              type="number"
+              min={0}
+              max={300}
+              value={waitMinutes}
+              onChange={(e) => setWaitMinutes(e.target.value)}
+              placeholder="e.g. 15"
+              className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">One-line Travel Tip (optional)</label>
+          <input
+            value={tip}
+            onChange={(e) => setTip(e.target.value)}
+            maxLength={100}
+            placeholder="e.g. Elephant queue long, jeep ride much faster."
+            className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Ground-Truth Crowd Photo (optional)</label>
+          <input
+            type="file"
+            ref={fileInputRef}
+            accept="image/*"
+            className="hidden"
+            onChange={handleImageChange}
+          />
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold hover:border-primary hover:bg-secondary/40 transition"
+            >
+              📷 {imageFile ? "Change Crowd Photo" : "Attach Crowd Photo"}
+            </button>
+            {imageFile && (
+              <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
+                ✓ Photo ready to share
+              </span>
+            )}
+          </div>
+          {imageFile && (
+            <div className="relative mt-2.5 inline-block">
+              <img
+                src={imageFile}
+                alt="Selected crowd preview"
+                className="h-24 w-36 rounded-xl object-cover border-2 border-primary/40 shadow-sm"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  setImageFile(null);
+                  if (fileInputRef.current) fileInputRef.current.value = "";
+                }}
+                className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-[11px] font-bold text-destructive-foreground shadow hover:scale-110 transition"
+                title="Remove photo"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+        </div>
+
+        <button
+          type="submit"
+          disabled={submitting}
+          className="w-full rounded-full bg-primary py-3 font-semibold text-primary-foreground shadow transition hover:bg-saffron hover:scale-[1.01] disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {submitting ? "Submitting to database..." : "Share check-in · +20 pts"}
+        </button>
+
+        <p className="text-center text-xs text-muted-foreground">
+          Persisted in PostgreSQL · 1 report per place / 45 min · Daily 100 pt cap
+        </p>
+      </form>
+
+      {/* Shared Community Feed Card */}
+      <div className="flex flex-col rounded-2xl border bg-card p-6 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b pb-3">
+          <div>
+            <h4 className="font-display text-lg text-primary">Shared Community Feed</h4>
+            <p className="text-xs text-muted-foreground">Live observations submitted by travellers on the ground</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              value={filterPlace}
+              onChange={(e) => setFilterPlace(e.target.value)}
+              className="rounded-lg border bg-background px-2.5 py-1 text-xs font-semibold text-muted-foreground"
+            >
+              <option value="all">All Jaipur Places</option>
+              {PLACES.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            {onRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="rounded-lg border border-border px-2 py-1 text-xs hover:border-primary transition"
+                title="Refresh community feed"
+              >
+                🔄
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Loading State */}
+        {loading && (
+          <div className="flex h-64 flex-col items-center justify-center text-center p-6 space-y-3">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            <p className="font-display text-base text-primary">Fetching live community observations...</p>
+            <p className="text-xs text-muted-foreground">Connecting to Musafir database</p>
+          </div>
+        )}
+
+        {/* Error State with Honest Feedback & Retry */}
+        {!loading && error && (
+          <div className="flex h-64 flex-col items-center justify-center text-center p-6 rounded-xl border border-dashed border-destructive/40 bg-destructive/5 space-y-3">
+            <span className="text-3xl">⚠️</span>
+            <p className="font-semibold text-destructive">Database Connection Notice</p>
+            <p className="text-xs text-muted-foreground max-w-sm">{error}</p>
+            {onRetry && (
+              <button
+                onClick={onRetry}
+                className="rounded-full bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground shadow hover:bg-saffron transition"
+              >
+                Retry Connecting
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Empty State (Zero Fabricated Data) */}
+        {!loading && !error && filteredReports.length === 0 && (
+          <div className="flex h-64 flex-col items-center justify-center text-center p-6 rounded-xl border border-dashed border-border bg-secondary/30 space-y-2">
+            <span className="text-3xl">🏜️</span>
+            <p className="font-display text-base text-primary">No live community reports yet</p>
+            <p className="text-xs text-muted-foreground max-w-sm">
+              {filterPlace === "all"
+                ? "No reports have been submitted to the database yet. Submit the first genuine check-in above!"
+                : `No reports submitted for ${byId(filterPlace)?.name || filterPlace} yet. Share what conditions look like right now!`}
+            </p>
+          </div>
+        )}
+
+        {/* Real Reports Feed */}
+        {!loading && !error && filteredReports.length > 0 && (
+          <div className="max-h-[440px] space-y-3 overflow-y-auto pr-1">
+            {filteredReports.map((r) => {
+              const placeId = r.place || r.destination_id || "hawa";
+              const placeObj = byId(placeId);
+              const displayName = r.destination_name || placeObj?.name || placeId;
+              const author = r.user || r.user_name || "Traveller";
+              const cLevel = r.status || r.crowd_level || "Quiet";
+              const isFlagged = r.moderation_status === "flagged" || flaggedSet.has(r.id);
+              const isVoted = votedSet.has(r.id);
+
+              return (
+                <div key={r.id} className="flex flex-col gap-2 rounded-xl border bg-card p-4 shadow-sm animate-in fade-in slide-in-from-top-2">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-saffron font-display text-primary-foreground font-bold">
+                      {author[0].toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2 text-sm">
+                        <b className="truncate">{author}</b>
+                        <span className="text-muted-foreground text-xs">
+                          at <span className="font-medium text-foreground">{displayName}</span> · {r.ago || "recently"}
+                        </span>
+                        <span className={`ml-auto rounded-full px-2.5 py-0.5 text-xs font-bold text-primary-foreground ${tone[cLevel] || "bg-crowd-low"}`}>
+                          {cLevel}
+                        </span>
+                      </div>
+
+                      {/* Optional details: forecast comparison & queue wait */}
+                      <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                        {r.vs_forecast && <span className="rounded bg-secondary px-1.5 py-0.5 font-medium">Vs forecast: {r.vs_forecast}</span>}
+                        {r.wait_minutes && r.wait_minutes > 0 ? (
+                          <span className="rounded bg-secondary px-1.5 py-0.5 font-medium">⏳ {r.wait_minutes} min wait</span>
+                        ) : null}
+                        {r.trust_weight && r.trust_weight > 1.1 && (
+                          <span className="rounded bg-gold/15 text-gold px-1.5 py-0.5 font-bold">✓ High trust</span>
+                        )}
+                      </div>
+
+                      {r.tip && <p className="mt-2 text-sm italic text-foreground bg-secondary/40 rounded-lg p-2">“{r.tip}”</p>}
+
+                      {/* Attached Crowd Photo */}
+                      {(r.image || r.photo_url) && (
+                        <div className="mt-2.5 overflow-hidden rounded-xl border border-border/70 bg-black/5 max-w-sm shadow-sm">
+                          <img
+                            src={r.image || r.photo_url || ""}
+                            alt={`Crowd visual at ${displayName}`}
+                            className="h-44 w-full object-cover transition duration-300 hover:scale-[1.02]"
+                            loading="lazy"
+                          />
+                          <div className="flex items-center justify-between bg-secondary/90 px-2.5 py-1 text-[11px] text-muted-foreground">
+                            <span>📷 Ground-truth photo</span>
+                            <span className="text-emerald-700 font-semibold">✓ Verified visual</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Verification & Flagging Action Row */}
+                  <div className="mt-1 flex items-center justify-between border-t pt-2 text-xs text-muted-foreground">
+                    <span className="text-[11px]">
+                      {isFlagged ? (
+                        <span className="text-amber-600 font-semibold">⚠️ Flagged for review</span>
+                      ) : (
+                        <span className="text-emerald-700 font-medium">✓ Verified Live Observation</span>
+                      )}
+                    </span>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => handleVote(r.id)}
+                        disabled={isVoted}
+                        className={`transition hover:text-primary ${isVoted ? "font-bold text-primary" : ""}`}
+                        title="Confirm this crowd condition is still accurate"
+                      >
+                        Still accurate? 👍 ({ (r.accuracy_votes_count || 0) + (isVoted ? 1 : 0) })
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleFlag(r.id)}
+                        disabled={isFlagged}
+                        className="text-muted-foreground/70 hover:text-destructive transition"
+                        title="Flag inappropriate or false report"
+                      >
+                        {isFlagged ? "Flagged" : "🚩 Report"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
