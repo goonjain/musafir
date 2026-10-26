@@ -1,4 +1,5 @@
 import os
+os.environ["TESTING"] = "1"
 import pytest
 from datetime import datetime, timezone, timedelta
 from fastapi.testclient import TestClient
@@ -7,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.app.main import app
+app.state.testing = True
 from backend.app.database import Base, get_db
 from backend.app.models import Destination, User, CrowdReport, Reward, AccuracyVote
 from backend.app.config import settings

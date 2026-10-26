@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -57,17 +58,18 @@ def seed_destinations():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize DB schema
-    Base.metadata.create_all(bind=engine)
-    # Safe migration: ensure image column exists
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE crowd_reports ADD COLUMN image TEXT"))
-            conn.commit()
-    except Exception:
-        pass
-    # Seed destination foundation
-    seed_destinations()
+    if os.getenv("TESTING") != "1" and not getattr(app.state, "testing", False):
+        # Initialize DB schema
+        Base.metadata.create_all(bind=engine)
+        # Safe migration: ensure image column exists
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE crowd_reports ADD COLUMN image TEXT"))
+                conn.commit()
+        except Exception:
+            pass
+        # Seed destination foundation
+        seed_destinations()
     yield
 
 app = FastAPI(
