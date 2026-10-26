@@ -7,7 +7,7 @@ import {
 } from "@/components/musafir/Sections";
 import { byId } from "@/lib/jaipur-data";
 import { applyStopReplacement, removeStopReplacement } from "@/lib/recommendation";
-import { api } from "@/lib/api";
+import { api, type DestinationItem } from "@/lib/api";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -58,6 +58,7 @@ function Index() {
   const [optimized, setOptimized] = useState(false);
   const [points, setPoints] = useState(0);
   const [reports, setReports] = useState<Report[]>([]);
+  const [destinations, setDestinations] = useState<DestinationItem[]>([]);
   const [loadingReports, setLoadingReports] = useState(true);
   const [reportsError, setReportsError] = useState<string | null>(null);
   const [pulseAdj, setPulseAdj] = useState<Record<string, number>>({});
@@ -66,6 +67,13 @@ function Index() {
   // Stage 2: Map focus and destination selection state
   const [selectedMapPlaceId, setSelectedMapPlaceId] = useState<string | null>(null);
   const [mapFocusKey, setMapFocusKey] = useState<number>(0);
+
+  const fetchDestinations = async () => {
+    const list = await api.getDestinations();
+    if (list && list.length > 0) {
+      setDestinations(list);
+    }
+  };
 
   const fetchReports = async () => {
     setLoadingReports(true);
@@ -89,6 +97,7 @@ function Index() {
   };
 
   useEffect(() => {
+    fetchDestinations();
     fetchReports();
     fetchRewards();
   }, []);
@@ -286,6 +295,8 @@ function Index() {
           <SectionTitle kicker="Step 5 · समुदाय" title="Musafir Pulse" sub="Travellers on the ground keep the forecast honest." />
           <Pulse
             reports={reports}
+            destinations={destinations}
+            onDestinationAdded={(newDest) => setDestinations((prev) => [...prev, newDest])}
             loading={loadingReports}
             error={reportsError}
             onRetry={fetchReports}

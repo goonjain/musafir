@@ -99,6 +99,50 @@ export type LiveCrowdData = {
   level: "Low" | "Moderate" | "High" | "Critical";
 };
 
+export type DestinationItem = {
+  id: string;
+  name: string;
+  hindi?: string | null;
+  category?: string;
+  cost?: number;
+  hours?: string | null;
+  tags?: string[];
+  capacity?: number;
+  sensitivity?: string;
+  base_crowd?: number;
+  is_gem?: boolean;
+  alternatives?: string[];
+};
+
+export type PostComment = {
+  id: number;
+  post_id: number;
+  user_id: string;
+  user_name: string;
+  content: string;
+  created_at: string;
+  ago: string;
+  moderation_status: string;
+};
+
+export type TravelPost = {
+  id: number;
+  user_id: string;
+  user_name: string;
+  destination_id?: string | null;
+  destination_name?: string | null;
+  title?: string | null;
+  content: string;
+  image_url?: string | null;
+  created_at: string;
+  ago: string;
+  moderation_status: string;
+  likes_count: number;
+  has_liked: boolean;
+  comments_count: number;
+  comments: PostComment[];
+};
+
 export type RewardBalanceData = {
   user_id: string;
   total_points: number;
@@ -211,6 +255,78 @@ export const api = {
     return apiRequest(`/gems/${encodeURIComponent(gemId)}/confirmations`, {
       method: "POST",
       body: JSON.stringify({ worth_it: worthIt, crowd_level: crowdLevel }),
+    });
+  },
+
+  /* ---------------- Destinations & Dynamic Places ---------------- */
+  async getDestinations(search?: string): Promise<DestinationItem[]> {
+    const qParam = search && search.trim() ? `?q=${encodeURIComponent(search.trim())}` : "";
+    const res = await apiRequest<DestinationItem[]>(`/destinations${qParam}`);
+    if (res.data && Array.isArray(res.data) && res.data.length > 0) {
+      return res.data;
+    }
+    // Fallback to canonical PLACES if backend offline
+    return PLACES.map((p) => ({
+      id: p.id,
+      name: p.name,
+      hindi: p.hindi,
+      tags: p.tags,
+      base_crowd: p.base,
+      is_gem: p.gem,
+      alternatives: p.alternatives,
+    }));
+  },
+
+  async createDestination(payload: {
+    name: string;
+    hindi?: string;
+    category?: string;
+    tags?: string[];
+    sensitivity?: "normal" | "fragile";
+  }) {
+    return apiRequest<DestinationItem>("/destinations", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /* ---------------- Travel Social Community Feed ---------------- */
+  async getTravelPosts(destinationId?: string, limit = 25, offset = 0) {
+    const params = new URLSearchParams();
+    if (destinationId && destinationId !== "all") params.set("destination_id", destinationId);
+    params.set("limit", limit.toString());
+    params.set("offset", offset.toString());
+    return apiRequest<TravelPost[]>(`/posts?${params.toString()}`);
+  },
+
+  async createTravelPost(payload: {
+    destination_id?: string;
+    title?: string;
+    content: string;
+    image_url?: string;
+    user_name?: string;
+  }) {
+    return apiRequest<TravelPost>("/posts", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async togglePostLike(postId: number) {
+    return apiRequest<{ success: boolean; post_id: number; liked: boolean; likes_count: number }>(
+      `/posts/${postId}/like`,
+      { method: "POST" }
+    );
+  },
+
+  async getPostComments(postId: number) {
+    return apiRequest<PostComment[]>(`/posts/${postId}/comments`);
+  },
+
+  async createPostComment(postId: number, payload: { content: string; user_name?: string }) {
+    return apiRequest<PostComment>(`/posts/${postId}/comments`, {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   },
 

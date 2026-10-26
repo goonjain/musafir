@@ -18,6 +18,9 @@ class User(Base):
     rewards = relationship("Reward", back_populates="user", cascade="all, delete-orphan")
     votes = relationship("AccuracyVote", back_populates="user", cascade="all, delete-orphan")
     suggestions = relationship("GemSuggestion", back_populates="user", cascade="all, delete-orphan")
+    posts = relationship("TravelPost", back_populates="user", cascade="all, delete-orphan")
+    post_likes = relationship("PostLike", back_populates="user", cascade="all, delete-orphan")
+    post_comments = relationship("PostComment", back_populates="user", cascade="all, delete-orphan")
 
 
 class Destination(Base):
@@ -37,6 +40,7 @@ class Destination(Base):
     alternatives = Column(JSON, default=list)
 
     reports = relationship("CrowdReport", back_populates="destination", cascade="all, delete-orphan")
+    posts = relationship("TravelPost", back_populates="destination", cascade="all, delete-orphan")
 
 
 class CrowdReport(Base):
@@ -131,3 +135,52 @@ class GemConfirmation(Base):
     __table_args__ = (
         UniqueConstraint("gem_id", "user_id", "visited_on", name="uq_gem_user_visit"),
     )
+
+
+class TravelPost(Base):
+    __tablename__ = "travel_posts"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    destination_id = Column(String(50), ForeignKey("destinations.id", ondelete="CASCADE"), nullable=True, index=True)
+    title = Column(String(150), nullable=True)
+    content = Column(Text, nullable=False)
+    image_url = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.datetime.now(datetime.timezone.utc), index=True)
+    moderation_status = Column(String(20), nullable=False, default="approved", index=True)
+
+    user = relationship("User", back_populates="posts")
+    destination = relationship("Destination", back_populates="posts")
+    likes = relationship("PostLike", back_populates="post", cascade="all, delete-orphan")
+    comments = relationship("PostComment", back_populates="post", cascade="all, delete-orphan")
+
+
+class PostLike(Base):
+    __tablename__ = "post_likes"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    post_id = Column(Integer, ForeignKey("travel_posts.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.datetime.now(datetime.timezone.utc))
+
+    user = relationship("User", back_populates="post_likes")
+    post = relationship("TravelPost", back_populates="likes")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "post_id", name="uq_user_post_like"),
+    )
+
+
+class PostComment(Base):
+    __tablename__ = "post_comments"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    post_id = Column(Integer, ForeignKey("travel_posts.id", ondelete="CASCADE"), nullable=False, index=True)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.datetime.now(datetime.timezone.utc), index=True)
+    moderation_status = Column(String(20), nullable=False, default="approved", index=True)
+
+    user = relationship("User", back_populates="post_comments")
+    post = relationship("TravelPost", back_populates="comments")
+

@@ -1,9 +1,10 @@
-import { useMemo, useState, useRef } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 import {
   PLACES, byId, crowdScore, level, levelClass, DAYS, INTERESTS,
   type ForecastInput, type Place,
 } from "@/lib/jaipur-data";
 import { rankAlternatives, formatDistance } from "@/lib/recommendation";
+import { api, type DestinationItem, type TravelPost, type PostComment } from "@/lib/api";
 
 export type Report = {
   id: number;
@@ -538,7 +539,7 @@ export function HiddenGems({
 export { LiveMap } from "./LiveMap";
 
 
-/* ---------------- Pulse (Real Community Engine) ---------------- */
+/* ---------------- Pulse (Real Community Engine & Travel Social Feed) ---------------- */
 export function Pulse({
   reports,
   addReport,
@@ -548,6 +549,8 @@ export function Pulse({
   onSubmitReport,
   onVoteAccuracy,
   onFlagReport,
+  destinations: propDestinations,
+  onDestinationAdded,
 }: {
   reports: Report[];
   addReport?: (r: Omit<Report, "id" | "ago" | "user">) => void;
@@ -565,7 +568,10 @@ export function Pulse({
   }) => Promise<{ success: boolean; message?: string; error?: string }>;
   onVoteAccuracy?: (reportId: number) => Promise<void>;
   onFlagReport?: (reportId: number) => Promise<void>;
+  destinations?: DestinationItem[];
+  onDestinationAdded?: (dest: DestinationItem) => void;
 }) {
+  const [activeTab, setActiveTab] = useState<"crowd" | "stories">("crowd");
   const [place, setPlace] = useState("hawa");
   const [status, setStatus] = useState<"Quiet" | "Moderate" | "Busy" | "Packed">("Quiet");
   const [vsForecast, setVsForecast] = useState<"Quieter" | "About right" | "Busier" | "">("");
@@ -580,6 +586,32 @@ export function Pulse({
   const [votedSet, setVotedSet] = useState<Set<number>>(new Set());
   const [flaggedSet, setFlaggedSet] = useState<Set<number>>(new Set());
 
+  // Dynamic destination list & "Add New Place"
+  const [destList, setDestList] = useState<DestinationItem[]>([]);
+  const [showAddPlaceModal, setShowAddPlaceModal] = useState(false);
+  const [newPlaceName, setNewPlaceName] = useState("");
+  const [newPlaceHindi, setNewPlaceHindi] = useState("");
+  const [newPlaceCategory, setNewPlaceCategory] = useState("heritage");
+  const [addingPlace, setAddingPlace] = useState(false);
+  const [addPlaceError, setAddPlaceError] = useState<string | null>(null);
+
+  // Travel Social Stories State
+  const [posts, setPosts] = useState<TravelPost[]>([]);
+  const [loadingPosts, setLoadingPosts] = useState(false);
+  const [postsError, setPostsError] = useState<string | null>(null);
+  const [filterStoryPlace, setFilterStoryPlace] = useState("all");
+  const [showCreateStory, setShowCreateStory] = useState(false);
+  const [storyPlace, setStoryPlace] = useState("hawa");
+  const [storyTitle, setStoryTitle] = useState("");
+  const [storyContent, setStoryContent] = useState("");
+  const [storyImage, setStoryImage] = useState<string | null>(null);
+  const storyFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [storySubmitting, setStorySubmitting] = useState(false);
+  const [storyFeedback, setStoryFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [expandedComments, setExpandedComments] = useState<Record<number, boolean>>({});
+  const [newCommentText, setNewCommentText] = useState<Record<number, string>>({});
+  const [commentSubmitting, setCommentSubmitting] = useState<Record<number, boolean>>({});
+
   const tone: Record<string, string> = {
     Quiet: "bg-crowd-low",
     Moderate: "bg-crowd-moderate",
@@ -587,15 +619,77 @@ export function Pulse({
     Packed: "bg-crowd-critical",
   };
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // Load destinations
+  useEffect(() => {
+    if (propDestinations && propDestinations.length > 0) {
+      setDestList(propDestinations);
+    } else {
+      api.getDestinations().then((res) => {
+        if (res && res.length > 0) setDestList(res);
+      });
+    }
+  }, [propDestinations]);
 
-    if (!file.type.startsWith("image/")) {
-      setFeedback({ type: "error", text: "Please select an image file (JPEG, PNG, WEBP)." });
+  // Load travel stories
+  const loadStories = async (destId?: string) => {
+    setLoadingPosts(true);
+    setPostsError(null);
+    const targetPlace = destId !== undefined ? destId : filterStoryPlace;
+    const res = await api.getTravelPosts(targetPlace);
+    setLoadingPosts(false);
+    if (res.data) {
+      setPosts(res.data);
+    } else if (res.error) {
+      setPostsError(res.error);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "stories") {
+      loadStories(filterStoryPlace);
+    }
+  }, [activeTab, filterStoryPlace]);
+
+  // Add new destination handler
+  const handleAddNewPlace = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPlaceName.trim()) {
+      setAddPlaceError("Please enter a destination name.");
       return;
     }
+    setAddingPlace(true);
+    setAddPlaceError(null);
 
+    const res = await api.createDestination({
+      name: newPlaceName.trim(),
+      hindi: newPlaceHindi.trim() || undefined,
+      category: newPlaceCategory,
+    });
+
+    setAddingPlace(false);
+    if (res.data) {
+      const created = res.data;
+      setDestList((prev) => {
+        if (prev.some((p) => p.id === created.id)) return prev;
+        return [...prev, created].sort((a, b) => a.name.localeCompare(b.name));
+      });
+      setPlace(created.id);
+      if (onDestinationAdded) onDestinationAdded(created);
+      setShowAddPlaceModal(false);
+      setNewPlaceName("");
+      setNewPlaceHindi("");
+      setFeedback({ type: "success", text: `"${created.name}" added to Jaipur destinations!` });
+    } else {
+      setAddPlaceError(res.error || "Failed to add new destination.");
+    }
+  };
+
+  // Image resize handler
+  const handleImageUpload = (file: File, callback: (dataUrl: string) => void, errorCallback: (err: string) => void) => {
+    if (!file.type.startsWith("image/")) {
+      errorCallback("Please select an image file (JPEG, PNG, WEBP).");
+      return;
+    }
     const reader = new FileReader();
     reader.onload = (event) => {
       const img = new Image();
@@ -608,7 +702,7 @@ export function Pulse({
           h = Math.round((h * MAX) / w);
           w = MAX;
         } else if (h > MAX) {
-          w = Math.round((w * MAX) / h);
+          h = Math.round((h * MAX) / h);
           h = MAX;
         }
         canvas.width = w;
@@ -616,11 +710,31 @@ export function Pulse({
         const ctx = canvas.getContext("2d");
         ctx?.drawImage(img, 0, 0, w, h);
         const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
-        setImageFile(dataUrl);
+        callback(dataUrl);
       };
       img.src = event.target?.result as string;
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    handleImageUpload(
+      file,
+      (dataUrl) => setImageFile(dataUrl),
+      (err) => setFeedback({ type: "error", text: err })
+    );
+  };
+
+  const handleStoryImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    handleImageUpload(
+      file,
+      (dataUrl) => setStoryImage(dataUrl),
+      (err) => setStoryFeedback({ type: "error", text: err })
+    );
   };
 
   const handleFormSubmit = async (e: React.FormEvent) => {
@@ -664,6 +778,98 @@ export function Pulse({
     }
   };
 
+  // Travel Story Submit
+  const handleStorySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!storyContent.trim()) {
+      setStoryFeedback({ type: "error", text: "Please write your story or travel experience." });
+      return;
+    }
+    setStorySubmitting(true);
+    setStoryFeedback(null);
+
+    const res = await api.createTravelPost({
+      destination_id: storyPlace === "all" ? undefined : storyPlace,
+      title: storyTitle.trim() || undefined,
+      content: storyContent.trim(),
+      image_url: storyImage || undefined,
+      user_name: userName.trim() || undefined,
+    });
+
+    setStorySubmitting(false);
+    if (res.data) {
+      setPosts((prev) => [res.data!, ...prev]);
+      setStoryTitle("");
+      setStoryContent("");
+      setStoryImage(null);
+      if (storyFileInputRef.current) storyFileInputRef.current.value = "";
+      setShowCreateStory(false);
+      setStoryFeedback({
+        type: "success",
+        text: res.data.moderation_status === "flagged"
+          ? "Story submitted for moderation review · +15 pts!"
+          : "Travel Story shared with the community · +15 pts!",
+      });
+    } else {
+      setStoryFeedback({ type: "error", text: res.error || "Failed to publish story." });
+    }
+  };
+
+  // Toggle Post Like
+  const handleToggleLike = async (postId: number) => {
+    // Optimistic toggle
+    setPosts((prev) =>
+      prev.map((p) => {
+        if (p.id !== postId) return p;
+        const nextLiked = !p.has_liked;
+        return {
+          ...p,
+          has_liked: nextLiked,
+          likes_count: nextLiked ? p.likes_count + 1 : Math.max(0, p.likes_count - 1),
+        };
+      })
+    );
+
+    const res = await api.togglePostLike(postId);
+    if (res.data) {
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.id === postId
+            ? { ...p, has_liked: res.data!.liked, likes_count: res.data!.likes_count }
+            : p
+        )
+      );
+    }
+  };
+
+  // Post Comment Submit
+  const handleCommentSubmit = async (postId: number) => {
+    const text = newCommentText[postId]?.trim();
+    if (!text) return;
+
+    setCommentSubmitting((prev) => ({ ...prev, [postId]: true }));
+    const res = await api.createPostComment(postId, {
+      content: text,
+      user_name: userName.trim() || undefined,
+    });
+    setCommentSubmitting((prev) => ({ ...prev, [postId]: false }));
+
+    if (res.data) {
+      setNewCommentText((prev) => ({ ...prev, [postId]: "" }));
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.id === postId
+            ? {
+                ...p,
+                comments_count: p.comments_count + 1,
+                comments: [...p.comments, res.data!],
+              }
+            : p
+        )
+      );
+    }
+  };
+
   const handleVote = async (reportId: number) => {
     if (votedSet.has(reportId)) return;
     setVotedSet((prev) => new Set([...prev, reportId]));
@@ -680,346 +886,833 @@ export function Pulse({
     }
   };
 
+  const activeDestinations = destList.length > 0
+    ? destList
+    : PLACES.map((p) => ({
+        id: p.id,
+        name: p.name,
+        hindi: p.hindi,
+        category: "heritage",
+      }));
+
   const filteredReports = reports.filter((r) => {
     if (filterPlace === "all") return true;
     return (r.place || r.destination_id) === filterPlace;
   });
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_1.4fr]">
-      {/* Check-in Form Card */}
-      <form onSubmit={handleFormSubmit} className="space-y-4 rounded-2xl border bg-card p-6 shadow-sm">
-        <div className="flex items-center justify-between">
-          <h3 className="text-2xl font-semibold">I'm here right now</h3>
-          <span className="rounded-full bg-gold/20 px-2.5 py-0.5 text-xs font-bold text-foreground">Live check-in</span>
-        </div>
+    <div className="space-y-6">
+      {/* Top View Selector: Crowd Reports vs Travel Stories */}
+      <div className="flex flex-wrap items-center justify-center gap-3 border-b pb-4">
+        <button
+          type="button"
+          onClick={() => setActiveTab("crowd")}
+          className={`flex items-center gap-2 rounded-full px-5 py-2 text-sm font-semibold transition ${
+            activeTab === "crowd"
+              ? "bg-primary text-primary-foreground shadow"
+              : "bg-secondary text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <span>📍</span> Live Crowd Reports ({reports.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("stories")}
+          className={`flex items-center gap-2 rounded-full px-5 py-2 text-sm font-semibold transition ${
+            activeTab === "stories"
+              ? "bg-primary text-primary-foreground shadow"
+              : "bg-secondary text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <span>📸</span> Travel Stories & Moments ({posts.length})
+        </button>
+      </div>
 
-        {feedback && (
-          <div
-            className={`rounded-xl p-3 text-sm animate-in fade-in ${
-              feedback.type === "success"
-                ? "border border-gold/40 bg-gold/10 text-foreground font-medium"
-                : "border border-destructive/30 bg-destructive/10 text-destructive font-medium"
-            }`}
-          >
-            {feedback.type === "success" ? "🎉 " : "⚠ "}
-            {feedback.text}
-          </div>
-        )}
+      {/* VIEW 1: LIVE CROWD REPORTS */}
+      {activeTab === "crowd" && (
+        <div className="grid gap-6 lg:grid-cols-[1fr_1.4fr]">
+          {/* Check-in Form Card */}
+          <form onSubmit={handleFormSubmit} className="space-y-4 rounded-2xl border bg-card p-6 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h3 className="text-2xl font-semibold">I'm here right now</h3>
+              <span className="rounded-full bg-gold/20 px-2.5 py-0.5 text-xs font-bold text-foreground">Live check-in</span>
+            </div>
 
-        <div>
-          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Select Destination</label>
-          <select value={place} onChange={(e) => setPlace(e.target.value)} className="w-full rounded-lg border bg-background px-3 py-2 text-sm font-medium">
-            {PLACES.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name} ({p.hindi})
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Crowd Condition</label>
-          <div className="grid grid-cols-4 gap-1.5">
-            {(["Quiet", "Moderate", "Busy", "Packed"] as const).map((s) => (
-              <button
-                type="button"
-                key={s}
-                onClick={() => setStatus(s)}
-                className={`rounded-lg border py-2.5 text-xs font-bold transition ${
-                  status === s ? `${tone[s]} border-foreground text-primary-foreground shadow-sm scale-102` : "border-border bg-background hover:border-primary/50"
+            {feedback && (
+              <div
+                className={`rounded-xl p-3 text-sm animate-in fade-in ${
+                  feedback.type === "success"
+                    ? "border border-gold/40 bg-gold/10 text-foreground font-medium"
+                    : "border border-destructive/30 bg-destructive/10 text-destructive font-medium"
                 }`}
               >
-                {s}
-              </button>
-            ))}
-          </div>
-        </div>
+                {feedback.type === "success" ? "🎉 " : "⚠️ "}
+                {feedback.text}
+              </div>
+            )}
 
-        <div>
-          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Compared with Forecast (optional)</label>
-          <div className="grid grid-cols-3 gap-2">
-            {(["Quieter", "About right", "Busier"] as const).map((v) => (
-              <button
-                type="button"
-                key={v}
-                onClick={() => setVsForecast(vsForecast === v ? "" : v)}
-                className={`rounded-lg border py-1.5 text-xs font-medium transition ${
-                  vsForecast === v ? "border-primary bg-primary/10 text-primary font-bold" : "border-border bg-background hover:border-primary/40 text-muted-foreground"
-                }`}
+            <div>
+              <div className="mb-1 flex items-center justify-between">
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Select Destination</label>
+                <button
+                  type="button"
+                  onClick={() => setShowAddPlaceModal(true)}
+                  className="text-xs font-semibold text-primary hover:underline"
+                >
+                  + Can't find your destination? Add a new place
+                </button>
+              </div>
+              <select
+                value={place}
+                onChange={(e) => setPlace(e.target.value)}
+                className="w-full rounded-lg border bg-background px-3 py-2 text-sm font-medium"
               >
-                {v}
-              </button>
-            ))}
-          </div>
-        </div>
+                {activeDestinations.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} {p.hindi ? `(${p.hindi})` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Your Name (optional)</label>
-            <input
-              type="text"
-              value={userName}
-              onChange={(e) => setUserName(e.target.value)}
-              placeholder="e.g. Riya"
-              maxLength={40}
-              className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Wait (mins)</label>
-            <input
-              type="number"
-              min={0}
-              max={300}
-              value={waitMinutes}
-              onChange={(e) => setWaitMinutes(e.target.value)}
-              placeholder="e.g. 15"
-              className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
-            />
-          </div>
-        </div>
+            {/* Inline Add Place Modal / Form */}
+            {showAddPlaceModal && (
+              <div className="rounded-xl border border-gold/40 bg-secondary/30 p-4 space-y-3 animate-in fade-in">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-primary">Add a New Jaipur Destination</h4>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddPlaceModal(false)}
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    ✕
+                  </button>
+                </div>
+                {addPlaceError && (
+                  <p className="text-xs text-destructive font-medium">{addPlaceError}</p>
+                )}
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground">Place Name</label>
+                  <input
+                    type="text"
+                    value={newPlaceName}
+                    onChange={(e) => setNewPlaceName(e.target.value)}
+                    placeholder="e.g. Galta Kund or Nahargarh Ridge"
+                    className="mt-1 w-full rounded-md border bg-background px-2.5 py-1.5 text-xs"
+                    maxLength={80}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground">Hindi Name (optional)</label>
+                    <input
+                      type="text"
+                      value={newPlaceHindi}
+                      onChange={(e) => setNewPlaceHindi(e.target.value)}
+                      placeholder="e.g. गलता कुण्ड"
+                      className="mt-1 w-full rounded-md border bg-background px-2.5 py-1.5 text-xs"
+                      maxLength={80}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground">Category</label>
+                    <select
+                      value={newPlaceCategory}
+                      onChange={(e) => setNewPlaceCategory(e.target.value)}
+                      className="mt-1 w-full rounded-md border bg-background px-2.5 py-1.5 text-xs"
+                    >
+                      <option value="heritage">Heritage</option>
+                      <option value="nature">Nature</option>
+                      <option value="photography">Photography</option>
+                      <option value="shopping">Shopping</option>
+                      <option value="cafes">Cafes & Food</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="flex items-center justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddPlaceModal(false)}
+                    className="rounded-md px-3 py-1 text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAddNewPlace}
+                    disabled={addingPlace}
+                    className="rounded-md bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground hover:bg-saffron transition disabled:opacity-60"
+                  >
+                    {addingPlace ? "Saving..." : "Save & Select Place"}
+                  </button>
+                </div>
+              </div>
+            )}
 
-        <div>
-          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">One-line Travel Tip (optional)</label>
-          <input
-            value={tip}
-            onChange={(e) => setTip(e.target.value)}
-            maxLength={100}
-            placeholder="e.g. Elephant queue long, jeep ride much faster."
-            className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
-          />
-        </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Crowd Condition</label>
+              <div className="grid grid-cols-4 gap-1.5">
+                {(["Quiet", "Moderate", "Busy", "Packed"] as const).map((s) => (
+                  <button
+                    type="button"
+                    key={s}
+                    onClick={() => setStatus(s)}
+                    className={`rounded-lg border py-2.5 text-xs font-bold transition ${
+                      status === s ? `${tone[s]} border-foreground text-primary-foreground shadow-sm scale-102` : "border-border bg-background hover:border-primary/50"
+                    }`}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-        <div>
-          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Ground-Truth Crowd Photo (optional)</label>
-          <input
-            type="file"
-            ref={fileInputRef}
-            accept="image/*"
-            className="hidden"
-            onChange={handleImageChange}
-          />
-          <div className="flex flex-wrap items-center gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Compared with Forecast (optional)</label>
+              <div className="grid grid-cols-3 gap-2">
+                {(["Quieter", "About right", "Busier"] as const).map((v) => (
+                  <button
+                    type="button"
+                    key={v}
+                    onClick={() => setVsForecast(vsForecast === v ? "" : v)}
+                    className={`rounded-lg border py-1.5 text-xs font-medium transition ${
+                      vsForecast === v ? "border-primary bg-primary/10 text-primary font-bold" : "border-border bg-background hover:border-primary/40 text-muted-foreground"
+                    }`}
+                  >
+                    {v}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Your Name (optional)</label>
+                <input
+                  type="text"
+                  value={userName}
+                  onChange={(e) => setUserName(e.target.value)}
+                  placeholder="e.g. Riya"
+                  maxLength={40}
+                  className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Wait (mins)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={300}
+                  value={waitMinutes}
+                  onChange={(e) => setWaitMinutes(e.target.value)}
+                  placeholder="e.g. 15"
+                  className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">One-line Travel Tip (optional)</label>
+              <input
+                value={tip}
+                onChange={(e) => setTip(e.target.value)}
+                maxLength={100}
+                placeholder="e.g. Elephant queue long, jeep ride much faster."
+                className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Ground-Truth Crowd Photo (optional)</label>
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept="image/*"
+                className="hidden"
+                onChange={handleImageChange}
+              />
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold hover:border-primary hover:bg-secondary/40 transition"
+                >
+                  📷 {imageFile ? "Change Crowd Photo" : "Attach Crowd Photo"}
+                </button>
+                {imageFile && (
+                  <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
+                    ✓ Photo ready to share
+                  </span>
+                )}
+              </div>
+              {imageFile && (
+                <div className="relative mt-2.5 inline-block">
+                  <img
+                    src={imageFile}
+                    alt="Selected crowd preview"
+                    className="h-24 w-36 rounded-xl object-cover border-2 border-primary/40 shadow-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setImageFile(null);
+                      if (fileInputRef.current) fileInputRef.current.value = "";
+                    }}
+                    className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-[11px] font-bold text-destructive-foreground shadow hover:scale-110 transition"
+                    title="Remove photo"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+            </div>
+
             <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold hover:border-primary hover:bg-secondary/40 transition"
+              type="submit"
+              disabled={submitting}
+              className="w-full rounded-full bg-primary py-3 font-semibold text-primary-foreground shadow transition hover:bg-saffron hover:scale-[1.01] disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              📷 {imageFile ? "Change Crowd Photo" : "Attach Crowd Photo"}
+              {submitting ? "Submitting to database..." : "Share check-in · +20 pts"}
             </button>
-            {imageFile && (
-              <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
-                ✓ Photo ready to share
-              </span>
+
+            <p className="text-center text-xs text-muted-foreground">
+              Persisted in database · 1 report per place / 45 min · Daily 100 pt cap
+            </p>
+          </form>
+
+          {/* Shared Community Feed Card */}
+          <div className="flex flex-col rounded-2xl border bg-card p-6 shadow-sm">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b pb-3">
+              <div>
+                <h4 className="font-display text-lg text-primary">Shared Community Feed</h4>
+                <p className="text-xs text-muted-foreground">Live observations submitted by travellers on the ground</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={filterPlace}
+                  onChange={(e) => setFilterPlace(e.target.value)}
+                  className="rounded-lg border bg-background px-2.5 py-1 text-xs font-semibold text-muted-foreground"
+                >
+                  <option value="all">All Jaipur Places</option>
+                  {activeDestinations.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+                {onRetry && (
+                  <button
+                    type="button"
+                    onClick={onRetry}
+                    className="rounded-lg border border-border px-2 py-1 text-xs hover:border-primary transition"
+                    title="Refresh community feed"
+                  >
+                    🔄
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Loading State */}
+            {loading && (
+              <div className="flex h-64 flex-col items-center justify-center text-center p-6 space-y-3">
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                <p className="font-display text-base text-primary">Fetching live community observations...</p>
+                <p className="text-xs text-muted-foreground">Connecting to Musafir database</p>
+              </div>
+            )}
+
+            {/* Error State */}
+            {!loading && error && (
+              <div className="flex h-64 flex-col items-center justify-center text-center p-6 rounded-xl border border-dashed border-destructive/40 bg-destructive/5 space-y-3">
+                <span className="text-3xl">⚠️</span>
+                <p className="font-semibold text-destructive">Database Connection Notice</p>
+                <p className="text-xs text-muted-foreground max-w-sm">{error}</p>
+                {onRetry && (
+                  <button
+                    onClick={onRetry}
+                    className="rounded-full bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground shadow hover:bg-saffron transition"
+                  >
+                    Retry Connecting
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Empty State */}
+            {!loading && !error && filteredReports.length === 0 && (
+              <div className="flex h-64 flex-col items-center justify-center text-center p-6 rounded-xl border border-dashed border-border bg-secondary/30 space-y-2">
+                <span className="text-3xl">🏜️</span>
+                <p className="font-display text-base text-primary">No live community reports yet</p>
+                <p className="text-xs text-muted-foreground max-w-sm">
+                  {filterPlace === "all"
+                    ? "No reports have been submitted to the database yet. Submit the first genuine check-in above!"
+                    : `No reports submitted for this place yet. Share what conditions look like right now!`}
+                </p>
+              </div>
+            )}
+
+            {/* Real Reports Feed */}
+            {!loading && !error && filteredReports.length > 0 && (
+              <div className="max-h-[440px] space-y-3 overflow-y-auto pr-1">
+                {filteredReports.map((r) => {
+                  const placeId = r.place || r.destination_id || "hawa";
+                  const foundDest = activeDestinations.find((d) => d.id === placeId);
+                  const displayName = r.destination_name || foundDest?.name || placeId;
+                  const author = r.user || r.user_name || "Traveller";
+                  const cLevel = r.status || r.crowd_level || "Quiet";
+                  const isFlagged = r.moderation_status === "flagged" || flaggedSet.has(r.id);
+                  const isVoted = votedSet.has(r.id);
+
+                  return (
+                    <div key={r.id} className="flex flex-col gap-2 rounded-xl border bg-card p-4 shadow-sm animate-in fade-in slide-in-from-top-2">
+                      <div className="flex items-start gap-3">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-saffron font-display text-primary-foreground font-bold">
+                          {author[0].toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2 text-sm">
+                            <b className="truncate">{author}</b>
+                            <span className="text-muted-foreground text-xs">
+                              at <span className="font-medium text-foreground">{displayName}</span> · {r.ago || "recently"}
+                            </span>
+                            <span className={`ml-auto rounded-full px-2.5 py-0.5 text-xs font-bold text-primary-foreground ${tone[cLevel] || "bg-crowd-low"}`}>
+                              {cLevel}
+                            </span>
+                          </div>
+
+                          <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                            {r.vs_forecast && <span className="rounded bg-secondary px-1.5 py-0.5 font-medium">Vs forecast: {r.vs_forecast}</span>}
+                            {r.wait_minutes && r.wait_minutes > 0 ? (
+                              <span className="rounded bg-secondary px-1.5 py-0.5 font-medium">⏳ {r.wait_minutes} min wait</span>
+                            ) : null}
+                            {r.trust_weight && r.trust_weight > 1.1 && (
+                              <span className="rounded bg-gold/15 text-gold px-1.5 py-0.5 font-bold">✓ High trust</span>
+                            )}
+                          </div>
+
+                          {r.tip && <p className="mt-2 text-sm italic text-foreground bg-secondary/40 rounded-lg p-2">“{r.tip}”</p>}
+
+                          {(r.image || r.photo_url) && (
+                            <div className="mt-2.5 overflow-hidden rounded-xl border border-border/70 bg-black/5 max-w-sm shadow-sm">
+                              <img
+                                src={r.image || r.photo_url || ""}
+                                alt={`Crowd visual at ${displayName}`}
+                                className="h-44 w-full object-cover transition duration-300 hover:scale-[1.02]"
+                                loading="lazy"
+                              />
+                              <div className="flex items-center justify-between bg-secondary/90 px-2.5 py-1 text-[11px] text-muted-foreground">
+                                <span>📷 Ground-truth photo</span>
+                                <span className="text-emerald-700 font-semibold">✓ Verified visual</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="mt-1 flex items-center justify-between border-t pt-2 text-xs text-muted-foreground">
+                        <span className="text-[11px]">
+                          {isFlagged ? (
+                            <span className="text-amber-600 font-semibold">⚠️ Flagged for review</span>
+                          ) : (
+                            <span className="text-emerald-700 font-medium">✓ Verified Live Observation</span>
+                          )}
+                        </span>
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => handleVote(r.id)}
+                            disabled={isVoted}
+                            className={`transition hover:text-primary ${isVoted ? "font-bold text-primary" : ""}`}
+                            title="Confirm this crowd condition is still accurate"
+                          >
+                            Still accurate? 👍 ({ (r.accuracy_votes_count || 0) + (isVoted ? 1 : 0) })
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleFlag(r.id)}
+                            disabled={isFlagged}
+                            className="text-muted-foreground/70 hover:text-destructive transition"
+                            title="Flag inappropriate or false report"
+                          >
+                            {isFlagged ? "Flagged" : "🚩 Report"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
-          {imageFile && (
-            <div className="relative mt-2.5 inline-block">
-              <img
-                src={imageFile}
-                alt="Selected crowd preview"
-                className="h-24 w-36 rounded-xl object-cover border-2 border-primary/40 shadow-sm"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  setImageFile(null);
-                  if (fileInputRef.current) fileInputRef.current.value = "";
-                }}
-                className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-[11px] font-bold text-destructive-foreground shadow hover:scale-110 transition"
-                title="Remove photo"
-              >
-                ✕
-              </button>
-            </div>
-          )}
         </div>
+      )}
 
-        <button
-          type="submit"
-          disabled={submitting}
-          className="w-full rounded-full bg-primary py-3 font-semibold text-primary-foreground shadow transition hover:bg-saffron hover:scale-[1.01] disabled:opacity-60 disabled:cursor-not-allowed"
-        >
-          {submitting ? "Submitting to database..." : "Share check-in · +20 pts"}
-        </button>
-
-        <p className="text-center text-xs text-muted-foreground">
-          Persisted in PostgreSQL · 1 report per place / 45 min · Daily 100 pt cap
-        </p>
-      </form>
-
-      {/* Shared Community Feed Card */}
-      <div className="flex flex-col rounded-2xl border bg-card p-6 shadow-sm">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b pb-3">
-          <div>
-            <h4 className="font-display text-lg text-primary">Shared Community Feed</h4>
-            <p className="text-xs text-muted-foreground">Live observations submitted by travellers on the ground</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <select
-              value={filterPlace}
-              onChange={(e) => setFilterPlace(e.target.value)}
-              className="rounded-lg border bg-background px-2.5 py-1 text-xs font-semibold text-muted-foreground"
-            >
-              <option value="all">All Jaipur Places</option>
-              {PLACES.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-            {onRetry && (
+      {/* VIEW 2: TRAVEL STORIES & MOMENTS (SOCIAL COMMUNITY FEED) */}
+      {activeTab === "stories" && (
+        <div className="space-y-6">
+          {/* Header Action Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-card p-4 shadow-sm">
+            <div>
+              <h4 className="font-display text-lg text-primary">Jaipur Travel Stories & Moments</h4>
+              <p className="text-xs text-muted-foreground">Genuine recommendations, hidden corners, and stories shared by fellow musafirs</p>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <select
+                value={filterStoryPlace}
+                onChange={(e) => setFilterStoryPlace(e.target.value)}
+                className="rounded-lg border bg-background px-3 py-1.5 text-xs font-semibold text-muted-foreground"
+              >
+                <option value="all">All Destinations</option>
+                {activeDestinations.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
               <button
                 type="button"
-                onClick={onRetry}
-                className="rounded-lg border border-border px-2 py-1 text-xs hover:border-primary transition"
-                title="Refresh community feed"
+                onClick={() => setShowCreateStory((prev) => !prev)}
+                className="rounded-full bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground shadow hover:bg-saffron transition"
+              >
+                {showCreateStory ? "✕ Close Form" : "+ Share a Story"}
+              </button>
+              <button
+                type="button"
+                onClick={() => loadStories(filterStoryPlace)}
+                className="rounded-lg border border-border px-2.5 py-1.5 text-xs hover:border-primary transition"
+                title="Refresh stories"
               >
                 🔄
               </button>
-            )}
+            </div>
           </div>
-        </div>
 
-        {/* Loading State */}
-        {loading && (
-          <div className="flex h-64 flex-col items-center justify-center text-center p-6 space-y-3">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-            <p className="font-display text-base text-primary">Fetching live community observations...</p>
-            <p className="text-xs text-muted-foreground">Connecting to Musafir database</p>
-          </div>
-        )}
+          {/* Create Story Form (Collapsible) */}
+          {showCreateStory && (
+            <form onSubmit={handleStorySubmit} className="rounded-2xl border border-primary/30 bg-card p-6 shadow-sm space-y-4 animate-in fade-in">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-primary">Share a Travel Story or Moment</h3>
+                <span className="rounded-full bg-gold/20 px-2.5 py-0.5 text-xs font-bold text-foreground">+15 pts</span>
+              </div>
 
-        {/* Error State with Honest Feedback & Retry */}
-        {!loading && error && (
-          <div className="flex h-64 flex-col items-center justify-center text-center p-6 rounded-xl border border-dashed border-destructive/40 bg-destructive/5 space-y-3">
-            <span className="text-3xl">⚠️</span>
-            <p className="font-semibold text-destructive">Database Connection Notice</p>
-            <p className="text-xs text-muted-foreground max-w-sm">{error}</p>
-            {onRetry && (
+              {storyFeedback && (
+                <div
+                  className={`rounded-xl p-3 text-sm animate-in fade-in ${
+                    storyFeedback.type === "success"
+                      ? "border border-gold/40 bg-gold/10 text-foreground font-medium"
+                      : "border border-destructive/30 bg-destructive/10 text-destructive font-medium"
+                  }`}
+                >
+                  {storyFeedback.type === "success" ? "🎉 " : "⚠️ "}
+                  {storyFeedback.text}
+                </div>
+              )}
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Associated Place</label>
+                  <select
+                    value={storyPlace}
+                    onChange={(e) => setStoryPlace(e.target.value)}
+                    className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="all">Jaipur (General)</option>
+                    {activeDestinations.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Story Headline (optional)</label>
+                  <input
+                    type="text"
+                    value={storyTitle}
+                    onChange={(e) => setStoryTitle(e.target.value)}
+                    placeholder="e.g. Quiet sunrise at Gaitor Ki Chhatriyan"
+                    maxLength={100}
+                    className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Your Travel Experience</label>
+                <textarea
+                  value={storyContent}
+                  onChange={(e) => setStoryContent(e.target.value)}
+                  placeholder="Share a tip, an uncrowded viewpoint, or what made this spot memorable..."
+                  rows={3}
+                  maxLength={1000}
+                  className="mt-1 w-full rounded-lg border bg-background p-3 text-sm"
+                  required
+                />
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 items-center">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Your Name (optional)</label>
+                  <input
+                    type="text"
+                    value={userName}
+                    onChange={(e) => setUserName(e.target.value)}
+                    placeholder="e.g. Kabir"
+                    maxLength={40}
+                    className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Attach Photo (optional)</label>
+                  <input
+                    type="file"
+                    ref={storyFileInputRef}
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleStoryImageChange}
+                  />
+                  <div className="mt-1 flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => storyFileInputRef.current?.click()}
+                      className="rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold hover:border-primary transition"
+                    >
+                      📷 {storyImage ? "Change Photo" : "Upload Photo"}
+                    </button>
+                    {storyImage && (
+                      <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
+                        ✓ Photo attached
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {storyImage && (
+                <div className="relative inline-block mt-2">
+                  <img
+                    src={storyImage}
+                    alt="Story preview"
+                    className="h-28 w-44 rounded-xl object-cover border shadow-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStoryImage(null);
+                      if (storyFileInputRef.current) storyFileInputRef.current.value = "";
+                    }}
+                    className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-[11px] font-bold text-destructive-foreground shadow hover:scale-110 transition"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateStory(false)}
+                  className="rounded-full px-4 py-2 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={storySubmitting}
+                  className="rounded-full bg-primary px-6 py-2 text-xs font-semibold text-primary-foreground shadow hover:bg-saffron transition disabled:opacity-60"
+                >
+                  {storySubmitting ? "Publishing..." : "Publish Travel Story"}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Stories Loading State */}
+          {loadingPosts && (
+            <div className="flex h-48 flex-col items-center justify-center text-center p-6 space-y-3 rounded-2xl border bg-card">
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              <p className="font-display text-base text-primary">Fetching community travel stories...</p>
+            </div>
+          )}
+
+          {/* Stories Error State */}
+          {!loadingPosts && postsError && (
+            <div className="flex h-48 flex-col items-center justify-center text-center p-6 rounded-2xl border border-dashed border-destructive/40 bg-destructive/5 space-y-2">
+              <span className="text-3xl">⚠️</span>
+              <p className="font-semibold text-destructive">{postsError}</p>
               <button
-                onClick={onRetry}
-                className="rounded-full bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground shadow hover:bg-saffron transition"
+                onClick={() => loadStories(filterStoryPlace)}
+                className="mt-2 rounded-full bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground"
               >
-                Retry Connecting
+                Retry
               </button>
-            )}
-          </div>
-        )}
+            </div>
+          )}
 
-        {/* Empty State (Zero Fabricated Data) */}
-        {!loading && !error && filteredReports.length === 0 && (
-          <div className="flex h-64 flex-col items-center justify-center text-center p-6 rounded-xl border border-dashed border-border bg-secondary/30 space-y-2">
-            <span className="text-3xl">🏜️</span>
-            <p className="font-display text-base text-primary">No live community reports yet</p>
-            <p className="text-xs text-muted-foreground max-w-sm">
-              {filterPlace === "all"
-                ? "No reports have been submitted to the database yet. Submit the first genuine check-in above!"
-                : `No reports submitted for ${byId(filterPlace)?.name || filterPlace} yet. Share what conditions look like right now!`}
-            </p>
-          </div>
-        )}
+          {/* Stories Empty State */}
+          {!loadingPosts && !postsError && posts.length === 0 && (
+            <div className="flex h-56 flex-col items-center justify-center text-center p-6 rounded-2xl border border-dashed border-border bg-secondary/30 space-y-2">
+              <span className="text-4xl">📖</span>
+              <p className="font-display text-base text-primary">No travel stories shared yet</p>
+              <p className="text-xs text-muted-foreground max-w-sm">
+                Be the first traveller to post a genuine Jaipur moment or hidden gem insight! Tap "+ Share a Story" above.
+              </p>
+            </div>
+          )}
 
-        {/* Real Reports Feed */}
-        {!loading && !error && filteredReports.length > 0 && (
-          <div className="max-h-[440px] space-y-3 overflow-y-auto pr-1">
-            {filteredReports.map((r) => {
-              const placeId = r.place || r.destination_id || "hawa";
-              const placeObj = byId(placeId);
-              const displayName = r.destination_name || placeObj?.name || placeId;
-              const author = r.user || r.user_name || "Traveller";
-              const cLevel = r.status || r.crowd_level || "Quiet";
-              const isFlagged = r.moderation_status === "flagged" || flaggedSet.has(r.id);
-              const isVoted = votedSet.has(r.id);
+          {/* Stories Cards Feed */}
+          {!loadingPosts && !postsError && posts.length > 0 && (
+            <div className="grid gap-5 md:grid-cols-2">
+              {posts.map((post) => {
+                const author = post.user_name || "Traveller";
+                const isExpanded = !!expandedComments[post.id];
 
-              return (
-                <div key={r.id} className="flex flex-col gap-2 rounded-xl border bg-card p-4 shadow-sm animate-in fade-in slide-in-from-top-2">
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-saffron font-display text-primary-foreground font-bold">
-                      {author[0].toUpperCase()}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2 text-sm">
-                        <b className="truncate">{author}</b>
-                        <span className="text-muted-foreground text-xs">
-                          at <span className="font-medium text-foreground">{displayName}</span> · {r.ago || "recently"}
-                        </span>
-                        <span className={`ml-auto rounded-full px-2.5 py-0.5 text-xs font-bold text-primary-foreground ${tone[cLevel] || "bg-crowd-low"}`}>
-                          {cLevel}
-                        </span>
-                      </div>
-
-                      {/* Optional details: forecast comparison & queue wait */}
-                      <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-                        {r.vs_forecast && <span className="rounded bg-secondary px-1.5 py-0.5 font-medium">Vs forecast: {r.vs_forecast}</span>}
-                        {r.wait_minutes && r.wait_minutes > 0 ? (
-                          <span className="rounded bg-secondary px-1.5 py-0.5 font-medium">⏳ {r.wait_minutes} min wait</span>
-                        ) : null}
-                        {r.trust_weight && r.trust_weight > 1.1 && (
-                          <span className="rounded bg-gold/15 text-gold px-1.5 py-0.5 font-bold">✓ High trust</span>
+                return (
+                  <div key={post.id} className="flex flex-col justify-between rounded-2xl border bg-card p-5 shadow-sm transition hover:shadow-md animate-in fade-in">
+                    <div>
+                      {/* Post Header */}
+                      <div className="flex items-center justify-between gap-2 border-b pb-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-saffron font-display text-sm font-bold text-primary-foreground">
+                            {author[0].toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-foreground leading-tight">{author}</p>
+                            <p className="text-[11px] text-muted-foreground">{post.ago || "recently"}</p>
+                          </div>
+                        </div>
+                        {post.destination_name && (
+                          <span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold text-primary">
+                            📍 {post.destination_name}
+                          </span>
                         )}
                       </div>
 
-                      {r.tip && <p className="mt-2 text-sm italic text-foreground bg-secondary/40 rounded-lg p-2">“{r.tip}”</p>}
+                      {/* Post Content */}
+                      <div className="mt-3 space-y-2">
+                        {post.title && (
+                          <h5 className="font-display text-base font-semibold text-foreground">
+                            {post.title}
+                          </h5>
+                        )}
+                        <p className="text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap">
+                          {post.content}
+                        </p>
 
-                      {/* Attached Crowd Photo */}
-                      {(r.image || r.photo_url) && (
-                        <div className="mt-2.5 overflow-hidden rounded-xl border border-border/70 bg-black/5 max-w-sm shadow-sm">
-                          <img
-                            src={r.image || r.photo_url || ""}
-                            alt={`Crowd visual at ${displayName}`}
-                            className="h-44 w-full object-cover transition duration-300 hover:scale-[1.02]"
-                            loading="lazy"
-                          />
-                          <div className="flex items-center justify-between bg-secondary/90 px-2.5 py-1 text-[11px] text-muted-foreground">
-                            <span>📷 Ground-truth photo</span>
-                            <span className="text-emerald-700 font-semibold">✓ Verified visual</span>
+                        {/* Optional Attached Photo */}
+                        {post.image_url && (
+                          <div className="mt-3 overflow-hidden rounded-xl border max-h-60 bg-black/5">
+                            <img
+                              src={post.image_url}
+                              alt={post.title || "Travel moment"}
+                              className="h-56 w-full object-cover transition hover:scale-[1.01]"
+                              loading="lazy"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Post Interactions (Likes & Comments Toggle) */}
+                    <div className="mt-4 pt-3 border-t">
+                      <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-4">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleLike(post.id)}
+                            className={`flex items-center gap-1.5 font-semibold transition hover:scale-105 ${
+                              post.has_liked ? "text-rose-600" : "text-muted-foreground hover:text-foreground"
+                            }`}
+                          >
+                            <span>{post.has_liked ? "❤️" : "🤍"}</span>
+                            <span>{post.likes_count} {post.likes_count === 1 ? "like" : "likes"}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedComments((prev) => ({
+                                ...prev,
+                                [post.id]: !prev[post.id],
+                              }))
+                            }
+                            className="flex items-center gap-1.5 font-semibold text-muted-foreground hover:text-foreground transition"
+                          >
+                            <span>💬</span>
+                            <span>{post.comments_count} {post.comments_count === 1 ? "comment" : "comments"}</span>
+                          </button>
+                        </div>
+
+                        {post.moderation_status === "flagged" && (
+                          <span className="text-[11px] text-amber-600 font-medium">⚠️ Under review</span>
+                        )}
+                      </div>
+
+                      {/* Comments Accordion */}
+                      {isExpanded && (
+                        <div className="mt-3 rounded-xl bg-secondary/30 p-3 space-y-3 animate-in fade-in">
+                          {/* Comments List */}
+                          {post.comments.length === 0 ? (
+                            <p className="text-xs text-muted-foreground italic">No comments yet. Start the conversation!</p>
+                          ) : (
+                            <div className="space-y-2 max-h-36 overflow-y-auto pr-1">
+                              {post.comments.map((c) => (
+                                <div key={c.id} className="rounded-lg bg-card p-2 text-xs border shadow-2xs">
+                                  <div className="flex items-center justify-between text-[11px]">
+                                    <b className="text-foreground">{c.user_name || "Traveller"}</b>
+                                    <span className="text-muted-foreground">{c.ago || "recently"}</span>
+                                  </div>
+                                  <p className="mt-1 text-foreground/90">{c.content}</p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Comment Input Form */}
+                          <div className="flex items-center gap-2 pt-1 border-t">
+                            <input
+                              type="text"
+                              value={newCommentText[post.id] || ""}
+                              onChange={(e) =>
+                                setNewCommentText((prev) => ({
+                                  ...prev,
+                                  [post.id]: e.target.value,
+                                }))
+                              }
+                              placeholder="Write a travel tip or question..."
+                              maxLength={300}
+                              className="flex-1 rounded-lg border bg-background px-2.5 py-1.5 text-xs"
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" && !e.shiftKey) {
+                                  e.preventDefault();
+                                  handleCommentSubmit(post.id);
+                                }
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleCommentSubmit(post.id)}
+                              disabled={commentSubmitting[post.id] || !newCommentText[post.id]?.trim()}
+                              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-saffron transition disabled:opacity-60"
+                            >
+                              {commentSubmitting[post.id] ? "..." : "Reply"}
+                            </button>
                           </div>
                         </div>
                       )}
                     </div>
                   </div>
-
-                  {/* Verification & Flagging Action Row */}
-                  <div className="mt-1 flex items-center justify-between border-t pt-2 text-xs text-muted-foreground">
-                    <span className="text-[11px]">
-                      {isFlagged ? (
-                        <span className="text-amber-600 font-semibold">⚠️ Flagged for review</span>
-                      ) : (
-                        <span className="text-emerald-700 font-medium">✓ Verified Live Observation</span>
-                      )}
-                    </span>
-                    <div className="flex items-center gap-3">
-                      <button
-                        type="button"
-                        onClick={() => handleVote(r.id)}
-                        disabled={isVoted}
-                        className={`transition hover:text-primary ${isVoted ? "font-bold text-primary" : ""}`}
-                        title="Confirm this crowd condition is still accurate"
-                      >
-                        Still accurate? 👍 ({ (r.accuracy_votes_count || 0) + (isVoted ? 1 : 0) })
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleFlag(r.id)}
-                        disabled={isFlagged}
-                        className="text-muted-foreground/70 hover:text-destructive transition"
-                        title="Flag inappropriate or false report"
-                      >
-                        {isFlagged ? "Flagged" : "🚩 Report"}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
+
 
 /* ---------------- Rewards / Circle / Simulator ---------------- */
 export function Extras({ points }: { points: number }) {

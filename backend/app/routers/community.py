@@ -8,7 +8,7 @@ from backend.app.database import get_db
 from backend.app.models import User, Destination, CrowdReport, AccuracyVote, Reward
 from backend.app.schemas import (
     CrowdReportCreate, CrowdReportResponse, LiveCrowdResponse,
-    AccuracyVoteCreate, ReportFlagCreate
+    AccuracyVoteCreate, ReportFlagCreate, DestinationCreate, DestinationResponse
 )
 from backend.app.services.moderation import check_moderation
 from backend.app.services.crowd_engine import (
@@ -412,3 +412,64 @@ def flag_crowd_report(
         "moderation_status": "flagged",
         "message": "Report flagged for moderation review. Thank you for keeping Musafir reliable."
     }
+
+@router.get("/destinations", response_model=list[DestinationResponse])
+def get_destinations(
+    q: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    query = db.query(Destination)
+    if q and q.strip():
+        search = f"%{q.strip().lower()}%"
+        query = query.filter(
+            func.lower(Destination.name).like(search) |
+            func.lower(Destination.hindi).like(search) |
+            func.lower(Destination.category).like(search) |
+            func.lower(Destination.id).like(search)
+        )
+    return query.order_by(Destination.name.asc()).all()
+
+@router.post("/destinations", response_model=DestinationResponse, status_code=status.HTTP_201_CREATED)
+def create_destination(
+    payload: DestinationCreate,
+    db: Session = Depends(get_db),
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id")
+):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Destination name cannot be empty")
+    
+    # Check if a destination with identical name (case-insensitive) already exists
+    existing = db.query(Destination).filter(func.lower(Destination.name) == name.lower()).first()
+    if existing:
+        return existing
+    
+    import re, uuid
+    slug = re.sub(r'[^a-z0-9]+', '_', name.lower()).strip('_')
+    if not slug:
+        slug = f"place_{uuid.uuid4().hex[:6]}"
+    
+    original_slug = slug
+    counter = 1
+    while db.query(Destination).filter(Destination.id == slug).first():
+        slug = f"{original_slug}_{counter}"
+        counter += 1
+    
+    new_dest = Destination(
+        id=slug,
+        name=name,
+        hindi=payload.hindi.strip() if payload.hindi else None,
+        category=payload.category or "heritage",
+        cost=0,
+        tags=payload.tags or ["community", "hidden_gem"],
+        capacity=600,
+        sensitivity=payload.sensitivity or "normal",
+        base_crowd=25,
+        is_gem=True,
+        alternatives=[]
+    )
+    db.add(new_dest)
+    db.commit()
+    db.refresh(new_dest)
+    return new_dest
+

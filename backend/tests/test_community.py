@@ -238,3 +238,129 @@ def test_hidden_gem_suggestions_and_alternatives():
     assert len(alts.json()["alternatives"]) >= 1
     assert alts.json()["alternatives"][0]["id"] == "jaigarh"
     assert "room_left_score" in alts.json()["alternatives"][0]
+
+def test_destination_search_and_custom_creation():
+    """Verify destination search and custom 'Add a new place' creation."""
+    # 1. Search existing
+    res = client.get("/api/destinations?q=amber")
+    assert res.status_code == 200
+    destinations = res.json()
+    assert len(destinations) >= 1
+    assert destinations[0]["id"] == "amber"
+
+    # 2. Add custom place
+    new_place_payload = {
+        "name": "Nahargarh Sunset Ridge",
+        "hindi": "नाहरगढ़ सनसेट रिज",
+        "category": "nature",
+        "tags": ["nature", "photography"],
+        "sensitivity": "fragile"
+    }
+    create_res = client.post("/api/destinations", json=new_place_payload, headers={"X-User-Id": "explorer_1"})
+    assert create_res.status_code == 201
+    created = create_res.json()
+    assert created["name"] == "Nahargarh Sunset Ridge"
+    assert "sunset_ridge" in created["id"]
+
+    # 3. Search finding newly created place
+    search_res = client.get("/api/destinations?q=sunset")
+    assert search_res.status_code == 200
+    assert any(d["id"] == created["id"] for d in search_res.json())
+
+def test_travel_social_post_creation_and_feed():
+    """Verify Travel Stories / Social feed creation and retrieval."""
+    headers = {"X-User-Id": "traveller_social_1"}
+    post_payload = {
+        "destination_id": "amber",
+        "title": "Magical Sunrise at Amber Gate",
+        "content": "Arrived at 7:30 AM before tourist buses. Suraj Pol courtyard was completely quiet and serene.",
+        "image_url": "data:image/jpeg;base64,mockphotodata",
+        "user_name": "Aarav"
+    }
+    res = client.post("/api/posts", json=post_payload, headers=headers)
+    assert res.status_code == 201
+    post = res.json()
+    assert post["title"] == "Magical Sunrise at Amber Gate"
+    assert post["user_name"] == "Aarav"
+    assert post["destination_name"] == "Amber Fort"
+    assert post["moderation_status"] == "approved"
+    assert post["likes_count"] == 0
+
+    # Retrieve feed
+    feed_res = client.get("/api/posts?destination_id=amber", headers=headers)
+    assert feed_res.status_code == 200
+    posts = feed_res.json()
+    assert len(posts) >= 1
+    assert posts[0]["id"] == post["id"]
+
+def test_travel_post_like_and_unlike_toggle():
+    """Verify like/unlike toggle and unique like constraint behavior."""
+    post_res = client.post("/api/posts", json={
+        "content": "Beautiful marble carvings at Royal Gaitor.",
+        "user_name": "Diya"
+    }, headers={"X-User-Id": "author_user"})
+    post_id = post_res.json()["id"]
+
+    # User 1 likes post
+    like_res1 = client.post(f"/api/posts/{post_id}/like", headers={"X-User-Id": "user_liker_1"})
+    assert like_res1.status_code == 200
+    assert like_res1.json()["liked"] is True
+    assert like_res1.json()["likes_count"] == 1
+
+    # User 1 toggles like (unlikes)
+    unlike_res = client.post(f"/api/posts/{post_id}/like", headers={"X-User-Id": "user_liker_1"})
+    assert unlike_res.status_code == 200
+    assert unlike_res.json()["liked"] is False
+    assert unlike_res.json()["likes_count"] == 0
+
+    # User 1 likes again + User 2 likes
+    client.post(f"/api/posts/{post_id}/like", headers={"X-User-Id": "user_liker_1"})
+    like_res2 = client.post(f"/api/posts/{post_id}/like", headers={"X-User-Id": "user_liker_2"})
+    assert like_res2.status_code == 200
+    assert like_res2.json()["likes_count"] == 2
+
+def test_travel_post_comments_flow():
+    """Verify commenting on travel posts."""
+    post_res = client.post("/api/posts", json={
+        "content": "Stepwell steps are symmetrical and stunning in morning light.",
+        "user_name": "Meera"
+    }, headers={"X-User-Id": "post_creator"})
+    post_id = post_res.json()["id"]
+
+    # Add comment
+    comment_res = client.post(f"/api/posts/{post_id}/comments", json={
+        "content": "What is the best time to avoid tour buses?",
+        "user_name": "Rohan"
+    }, headers={"X-User-Id": "commenter_1"})
+    assert comment_res.status_code == 201
+    assert comment_res.json()["content"] == "What is the best time to avoid tour buses?"
+    assert comment_res.json()["user_name"] == "Rohan"
+
+    # Get comments
+    get_res = client.get(f"/api/posts/{post_id}/comments")
+    assert get_res.status_code == 200
+    comments = get_res.json()
+    assert len(comments) == 1
+    assert comments[0]["content"] == "What is the best time to avoid tour buses?"
+
+def test_social_content_moderation_abusive_language():
+    """Verify that profanity or spam links are flagged for moderation."""
+    # Obfuscated profanity in post
+    res = client.post("/api/posts", json={
+        "content": "Check this out b a s t a r d scam discount",
+        "user_name": "Troll"
+    }, headers={"X-User-Id": "spammer"})
+    assert res.status_code == 201
+    assert res.json()["moderation_status"] == "flagged"
+
+    # Spam link in comment
+    post = client.post("/api/posts", json={
+        "content": "Clean travel story here.",
+    }, headers={"X-User-Id": "clean_user"}).json()
+
+    comment_res = client.post(f"/api/posts/{post['id']}/comments", json={
+        "content": "Click http://free-crypto-giveaway.xyz for prizes",
+    }, headers={"X-User-Id": "spammer"})
+    assert comment_res.status_code == 201
+    assert comment_res.json()["moderation_status"] == "flagged"
+
