@@ -12,15 +12,13 @@ import {
   Extras,
   type Plan,
 } from "@/components/musafir/Sections";
-<<<<<<< HEAD
-import { byId } from "@/lib/jaipur-data";
-import { applyStopReplacement, removeStopReplacement } from "@/lib/recommendation";
-import { PopularSpotsGraph } from "@/components/musafir/PopularSpotsGraph";
-=======
 import { observationsRepository, type CrowdReportRecord } from "@/lib/observations-repository";
 import type { VerifiedObservation } from "@/lib/crowd-service";
 import { BellRing } from "lucide-react";
->>>>>>> origin/main
+import { PopularSpotsGraph } from "@/components/musafir/PopularSpotsGraph";
+
+import { applyStopReplacement, removeStopReplacement } from "@/lib/recommendation";
+import { byId } from "@/lib/jaipur-data";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -54,6 +52,7 @@ const NAV: [string, string][] = [
 ];
 
 function Index() {
+  const [toast, setToast] = useState<string | null>(null);
   const [plan, setPlan] = useState<Plan>({
     day: "Sun",
     time: "full",
@@ -62,18 +61,6 @@ function Index() {
     type: "friends",
     crowd: "avoid",
     must: "amber",
-<<<<<<< HEAD
-    mustVisits: ["amber"],
-    fromDate: "2026-10-18",
-    fromTime: "09:00",
-    toDate: "2026-10-18",
-    toTime: "19:00",
-    foodInterests: ["thali"],
-    dietary: ["vegetarian"],
-    pacePreference: "balanced",
-    notes: "",
-=======
->>>>>>> origin/main
   });
   const [shown, setShown] = useState(false);
   const [optimized, setOptimized] = useState(false);
@@ -92,7 +79,9 @@ function Index() {
   const [activeBroadcast, setActiveBroadcast] = useState<string | null>(() =>
     observationsRepository.getActiveBroadcast(),
   );
-  const [toast, setToast] = useState<string | null>(null);
+  const [selectedMapPlaceId, setSelectedMapPlaceId] = useState<string | null>(null);
+  const [mapFocusKey, setMapFocusKey] = useState<number>(0);
+
 
   // Synchronize state whenever persistent repository is updated
   useEffect(() => {
@@ -228,18 +217,19 @@ function Index() {
         />
         <div className="absolute inset-0 bg-gradient-to-r from-indigo-deep/90 via-indigo-deep/60 to-transparent" />
         <div className="relative mx-auto w-full max-w-7xl px-4 text-primary-foreground">
-<<<<<<< HEAD
-          <p className="font-display text-xl text-gold">खम्मा घणी · पधारो म्हारे देस      </p>
-          <h1 className="mt-3 max-w-13xl text-8xl leading-tight md:text-7xl text-gold">   <span className="text-saffron">Welcome to the Pink City </span></h1>
-          <p className="mt-5 max-w-xl text-lg opacity-90">Musafir predicts crowd pressure across Jaipur and redirects you to hidden gems that match your vibe — from Amber Fort mornings to quiet stepwells.</p>
-          <button onClick={() => go("planner")} className="mt-8 rounded-full bg-primary px-8 py-3.5 font-display text-lg shadow-xl transition hover:scale-105 hover:bg-saffron">Plan my Jaipur day</button>
-=======
-          <p className="font-display text-xl text-gold">
-            पधारो म्हारे देस · Welcome to the Pink City
-          </p>
-          <h1 className="mt-3 max-w-3xl text-5xl leading-tight md:text-7xl font-bold">
-            Same city, same day. <span className="text-saffron">Half the crowd.</span>
-          </h1>
+          
+      <h1 className="mt-3 max-w-4xl font-serif font-bold leading-[1.05]">
+  <span className="block text-5xl text-[#FFF6EF] md:text-7xl">
+    Explore Jaipur.
+  </span>
+  <span className="mt-2 block bg-gradient-to-r from-[#FF6AA2] via-[#FF5C87] to-[#FFA167] bg-clip-text text-5xl text-transparent md:text-7xl">
+    Beyond the Crowds.
+  </span>
+</h1>
+
+<p className="mt-4 text-3xl font-semibold text-[#FFD5AF] md:text-4xl">
+  पधारो म्हारे देस
+</p>
           <p className="mt-5 max-w-xl text-lg opacity-90 leading-relaxed">
             Raahi predicts tourist congestion across Jaipur and redirects you to rich cultural gems
             that match your vibe — from early Amer Fort mornings to tranquil stepwells.
@@ -258,7 +248,6 @@ function Index() {
               Explore Live Map 🗺
             </button>
           </div>
->>>>>>> origin/main
           <div className="mt-12 flex flex-wrap gap-8 text-sm">
             {[
               ["428+ Cr", "domestic tourist visits in 2025"],
@@ -341,24 +330,11 @@ function Index() {
               sub="Geographic crowd distribution across Jaipur. Tap any marker to inspect baseline estimation and verified observations."
             />
             <LiveMap
-<<<<<<< HEAD
-              pulseAdj={pulseAdj}
-              reports={reports}
-              selectedPlaceId={selectedMapPlaceId}
-              focusKey={mapFocusKey}
-              onOptimize={(id) => {
-                setPlan((prev) => ({
-                  ...prev,
-                  must: id,
-                  mustVisits: [id, ...(prev.mustVisits?.filter((x) => x !== id) ?? [])],
-                }));
-=======
               observations={observations}
               adminOverrides={adminOverrides}
               reports={reports as any}
               onOptimize={(id) => {
                 setPlan({ ...plan, must: id });
->>>>>>> origin/main
                 setShown(true);
                 setOptimized(false);
                 setTimeout(() => go("itinerary"), 50);
@@ -389,23 +365,17 @@ function Index() {
       {/* Footer */}
       <footer className="bg-indigo-deep py-12 text-center text-primary-foreground border-t border-gold/30">
         <div className="border-bandhani mb-8" />
-<<<<<<< HEAD
-        <p className="font-display text-2xl text-gold">मुसाफ़िर</p>
-        <p className="mt-2 text-sm opacity-75">Built  by Aditya Vinayak Singh, Alice Sharma, Goon Jain & Paridhi Poddar</p>
-        <p className="mt-1 text-xs opacity-50">Prototype demo — crowd values are simulated.</p>
-=======
         <p className="font-display text-3xl text-gold font-bold">राही · Raahi</p>
         <p className="mt-2 text-sm opacity-85">
-          Jaipur Crowd-Aware Travel Platform · Built for Code Slayer 2.0 / Dev SphereIndia
+          Jaipur Crowd-Aware Travel Platform · 
         </p>
         <p className="mt-1 text-xs opacity-65">
-          By Ashwajeet Sharma, Alice Sharma, Goon Jain & Paridhi Poddar
+          By Aditya Vinayak Singh, Alice Sharma, Goon Jain & Paridhi Poddar
         </p>
         <p className="mt-3 text-[11px] opacity-50">
           Crowd intelligence powered by Raahi Baseline v1.0. Community observations verified by DoT
           Command Center.
         </p>
->>>>>>> origin/main
       </footer>
 
       {/* Dynamic User Feedback Toast */}
