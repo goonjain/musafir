@@ -29,6 +29,8 @@ export function LiveMap({
   observations = [],
   adminOverrides = {},
   onOptimize,
+  selectedPlaceId,
+  focusKey,
 }: LiveMapProps) {
   // Client-side mounted state for SSR safety
   const [mounted, setMounted] = useState(false);
