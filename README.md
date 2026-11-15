@@ -1,28 +1,17 @@
-# Jaipur Experience Hub
 
-**Live Demo:** https://musafir-seven-xi.vercel.app
+# Raahi — Jaipur Experience Hub
 
-prepare a website for this add all features like particularly we are showing demo for jaipur so make the ui ux interactive according to jaipur themes
+**Live Demo:** https://musafir-ecru.vercel.app/
 
-This project was built with [Lovable](https://lovable.dev).
+Raahi is a Jaipur-focused experience platform that helps visitors explore places, check community-reported crowd levels, and share travel updates.
 
-**Live app**: https://jaipur-vibe-showcase.lovable.app
+## Run locally
 
-## Build with Lovable
+Prerequisites: Node.js and npm.
 
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/f6d873ac-dc61-4029-9a4d-621e8d59b6ff).
-
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: every change made in Lovable is committed straight to this repository.
-- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
-
-## Development
-
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
-
-```sh
-git clone <this-repository-url>
-cd <repository-name>
-npm i
+```bash
+git clone https://github.com/goonjain/musafir.git
+cd musafir
+npm install
 npm run dev
 ```
