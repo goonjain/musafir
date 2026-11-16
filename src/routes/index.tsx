@@ -11,7 +11,11 @@ import {
   Pulse,
   Extras,
   type Plan,
+  type Report,
 } from "@/components/musafir/Sections";
+import { byId } from "@/lib/jaipur-data";
+import { applyStopReplacement, removeStopReplacement } from "@/lib/recommendation";
+import { api, type DestinationItem } from "@/lib/api";
 import { observationsRepository, type CrowdReportRecord } from "@/lib/observations-repository";
 import type { VerifiedObservation } from "@/lib/crowd-service";
 import { BellRing } from "lucide-react";
@@ -43,9 +47,21 @@ const NAV: [string, string][] = [
   ["forecast", "Forecast"],
   ["gems", "Hidden Gems"],
   ["map", "Live Map"],
-  ["pulse", "Pulse Reports"],
+  ["pulse", "Pulse"],
   ["rewards", "Rewards"],
 ];
+
+function computeAdjustments(reps: Report[]): Record<string, number> {
+  const adj: Record<string, number> = {};
+  for (const r of reps) {
+    const p = r.place || r.destination_id;
+    if (p && !(p in adj)) {
+      const s = r.status || r.crowd_level;
+      adj[p] = s === "Busy" ? 15 : s === "Packed" ? 25 : s === "Quiet" ? -15 : 0;
+    }
+  }
+  return adj;
+}
 
 function Index() {
   const [plan, setPlan] = useState<Plan>({
@@ -59,10 +75,21 @@ function Index() {
   });
   const [shown, setShown] = useState(false);
   const [optimized, setOptimized] = useState(false);
+
+  // Rewards balance: initialized from local persistent store, synced with backend
   const [points, setPoints] = useState<number>(
     () => observationsRepository.getUserProfile().points,
   );
-  const [reports, setReports] = useState<CrowdReportRecord[]>(() =>
+
+  // API-backed Community Pulse data
+  const [communityReports, setCommunityReports] = useState<Report[]>([]);
+  const [destinations, setDestinations] = useState<DestinationItem[]>([]);
+  const [loadingReports, setLoadingReports] = useState(true);
+  const [reportsError, setReportsError] = useState<string | null>(null);
+  const [pulseAdj, setPulseAdj] = useState<Record<string, number>>({});
+
+  // Local persistent observation repository state (Rajasthan DoT & live observations)
+  const [, setRepoReports] = useState<CrowdReportRecord[]>(() =>
     observationsRepository.getReports("all"),
   );
   const [observations, setObservations] = useState<VerifiedObservation[]>(() =>
@@ -74,12 +101,17 @@ function Index() {
   const [activeBroadcast, setActiveBroadcast] = useState<string | null>(() =>
     observationsRepository.getActiveBroadcast(),
   );
+
   const [toast, setToast] = useState<string | null>(null);
+
+  // Map focus and destination selection state
+  const [selectedMapPlaceId, setSelectedMapPlaceId] = useState<string | null>(null);
+  const [mapFocusKey, setMapFocusKey] = useState<number>(0);
 
   // Synchronize state whenever persistent repository is updated
   useEffect(() => {
     const unsubscribe = observationsRepository.subscribe(() => {
-      setReports(observationsRepository.getReports("all"));
+      setRepoReports(observationsRepository.getReports("all"));
       setObservations(observationsRepository.getActiveObservations());
       setPoints(observationsRepository.getUserProfile().points);
       setAdminOverrides(observationsRepository.getAdminOverrides());
@@ -88,30 +120,52 @@ function Index() {
     return unsubscribe;
   }, []);
 
-  const reward = (n: number, msg = `+${n} Raahi points!`) => {
-    observationsRepository.awardPoints(n);
-    setToast(msg);
-    setTimeout(() => setToast(null), 2500);
+  const fetchDestinations = async () => {
+    const list = await api.getDestinations();
+    if (list && list.length > 0) {
+      setDestinations(list);
+    }
   };
 
-  const handleTouristCheckIn = (
-    placeId: string,
-    status: "Quiet" | "Moderate" | "Busy",
-    tip: string,
-  ) => {
-    const res = observationsRepository.submitReport({
-      destinationId: placeId,
-      statusLevel: status,
-      tipText: tip,
-      userAlias: "You",
-    });
-
-    if (res.success) {
-      setToast(`🎉 ${res.message}`);
+  const fetchReports = async () => {
+    setLoadingReports(true);
+    setReportsError(null);
+    const res = await api.getReports();
+    if (res.data?.reports) {
+      const fetchedReports = res.data.reports as Report[];
+      setCommunityReports(fetchedReports);
+      setPulseAdj(computeAdjustments(fetchedReports));
+      setReportsError(null);
     } else {
-      setToast(`⚠ ${res.message}`);
+      setReportsError(res.error || "Unable to connect to community backend database.");
     }
-    setTimeout(() => setToast(null), 3500);
+    setLoadingReports(false);
+  };
+
+  const fetchRewards = async () => {
+    const res = await api.getRewardBalance();
+    if (res.data) {
+      const serverPoints = res.data.total_points;
+      const localPoints = observationsRepository.getUserProfile().points;
+      const maxPoints = Math.max(serverPoints, localPoints);
+      setPoints(maxPoints);
+      if (serverPoints > localPoints) {
+        observationsRepository.awardPoints(serverPoints - localPoints);
+      }
+    }
+  };
+
+  useEffect(() => {
+    fetchDestinations();
+    fetchReports();
+    fetchRewards();
+  }, []);
+
+  const reward = (n: number, msg = `+${n} Raahi points!`) => {
+    observationsRepository.awardPoints(n);
+    setPoints((p) => p + n);
+    setToast(msg);
+    setTimeout(() => setToast(null), 2500);
   };
 
   const go = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
@@ -141,6 +195,91 @@ function Index() {
     }));
     setToast("Reset all itinerary stops to original");
     setTimeout(() => setToast(null), 2000);
+  };
+
+  const handleSubmitReport = async (payload: {
+    destination_id: string;
+    crowd_level: "Quiet" | "Moderate" | "Busy" | "Packed";
+    vs_forecast?: "Quieter" | "About right" | "Busier";
+    wait_minutes?: number;
+    tip?: string;
+    image?: string;
+    user_name?: string;
+  }) => {
+    const res = await api.submitReport(payload);
+    if (!res.data || !res.data.success) {
+      const errorMsg = res.error || "Check-in failed. Please verify your details and try again.";
+      setToast(`⚠ ${errorMsg}`);
+      setTimeout(() => setToast(null), 3500);
+      return { success: false, error: errorMsg };
+    }
+
+    const newReport = res.data.report as Report;
+    setCommunityReports((prev) => {
+      if (prev.some((r) => r.id === newReport.id)) return prev;
+      return [newReport, ...prev];
+    });
+
+    // Synchronize with observation repository for DoT Command Center & Live Map
+    const localLevel = payload.crowd_level === "Packed" ? "Busy" : payload.crowd_level;
+    observationsRepository.submitReport({
+      destinationId: payload.destination_id,
+      statusLevel: localLevel as "Quiet" | "Moderate" | "Busy",
+      tipText:
+        payload.tip ||
+        (payload.wait_minutes ? `Wait time: ${payload.wait_minutes} mins` : "Ground-truth observation"),
+      userAlias: payload.user_name || "You",
+    });
+
+    const shift =
+      payload.crowd_level === "Busy"
+        ? 15
+        : payload.crowd_level === "Packed"
+        ? 25
+        : payload.crowd_level === "Quiet"
+        ? -15
+        : 0;
+    setPulseAdj((a) => ({ ...a, [payload.destination_id]: shift }));
+
+    const successMsg =
+      res.data.message ||
+      `Check-in shared · +${res.data.points_awarded ?? 20} pts!`;
+    setToast(successMsg);
+    setTimeout(() => setToast(null), 2500);
+    return { success: true, message: successMsg };
+  };
+
+  const handleVoteAccuracy = async (reportId: number) => {
+    const res = await api.voteAccuracy(reportId, 1);
+    if (res.data?.success) {
+      setCommunityReports((prev) =>
+        prev.map((r) =>
+          r.id === reportId
+            ? {
+                ...r,
+                accuracy_votes_count: (r.accuracy_votes_count || 0) + 1,
+                trust_weight: res.data!.trust_weight,
+              }
+            : r
+        )
+      );
+      setToast("Accuracy verified! Trust weight updated.");
+      setTimeout(() => setToast(null), 2200);
+    } else if (res.error) {
+      setToast(res.error);
+      setTimeout(() => setToast(null), 2200);
+    }
+  };
+
+  const handleFlagReport = async (reportId: number) => {
+    const res = await api.flagReport(reportId);
+    if (res.data?.success) {
+      setCommunityReports((prev) =>
+        prev.map((r) => (r.id === reportId ? { ...r, moderation_status: "flagged" } : r))
+      );
+      setToast("Report flagged for moderation review.");
+      setTimeout(() => setToast(null), 2200);
+    }
   };
 
   return (
@@ -278,6 +417,7 @@ function Index() {
                 setOptimized={setOptimized}
                 observations={observations}
                 onReward={(n) => reward(n, "Smart Route unlocked · +80 Raahi points!")}
+                onResetReplacements={handleResetReplacements}
               />
             </div>
           )}
@@ -291,7 +431,7 @@ function Index() {
               title="Explainable Crowd Forecast"
               sub="Multi-factor baseline (v1.0) with verifiable factor attribution and on-ground observation adjustment."
             />
-            <Forecast observations={observations} />
+            <Forecast pulseAdj={pulseAdj} observations={observations} />
           </div>
         </section>
 
@@ -302,7 +442,13 @@ function Index() {
             title="Nearby Hidden Gems"
             sub="Culturally comparable alternatives — when Amer Fort or Hawa Mahal peak, discover quiet architecture and heritage."
           />
-          <HiddenGems observations={observations} />
+          <HiddenGems
+            plan={plan}
+            onShowOnMap={handleShowOnMap}
+            onReplaceInRoute={handleReplaceInRoute}
+            onRemoveFromRoute={handleRemoveFromRoute}
+            observations={observations}
+          />
         </section>
 
         {/* Step 4: Live Map */}
@@ -314,9 +460,12 @@ function Index() {
               sub="Geographic crowd distribution across Jaipur. Tap any marker to inspect baseline estimation and verified observations."
             />
             <LiveMap
+              pulseAdj={pulseAdj}
+              reports={communityReports}
               observations={observations}
               adminOverrides={adminOverrides}
-              reports={reports as any}
+              selectedPlaceId={selectedMapPlaceId}
+              focusKey={mapFocusKey}
               onOptimize={(id) => {
                 setPlan({ ...plan, must: id });
                 setShown(true);
@@ -332,9 +481,19 @@ function Index() {
           <SectionTitle
             kicker="Step 5 · समुदाय"
             title="Raahi Community Pulse"
-            sub="On-ground traveler observations keep crowd intelligence honest. Submissions undergo DoT verification."
+            sub="On-ground traveler observations keep crowd intelligence honest. Submissions undergo verification."
           />
-          <Pulse reports={reports} onSubmitReport={handleTouristCheckIn} />
+          <Pulse
+            reports={communityReports}
+            destinations={destinations}
+            onDestinationAdded={(newDest) => setDestinations((prev) => [...prev, newDest])}
+            loading={loadingReports}
+            error={reportsError}
+            onRetry={fetchReports}
+            onSubmitReport={handleSubmitReport}
+            onVoteAccuracy={handleVoteAccuracy}
+            onFlagReport={handleFlagReport}
+          />
         </section>
 
         {/* Step 6: Rewards & What-If */}
