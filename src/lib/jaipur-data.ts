@@ -289,12 +289,7 @@ export type ForecastInput = {
   festival: boolean;
   weather: "clear" | "hot" | "rain";
 };
-export type ForecastInput = {
-  day: string;
-  hour: number;
-  festival: boolean;
-  weather: "clear" | "hot" | "rain";
-};
+
 
 export function crowdScore(p: Place, f: ForecastInput, pulse = 0) {
   const weekend = f.day === "Sat" || f.day === "Sun" ? 12 : 0;
