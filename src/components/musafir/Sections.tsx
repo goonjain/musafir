@@ -17,6 +17,7 @@ import {
   type VerifiedObservation,
 } from "@/lib/crowd-service";
 import { observationsRepository, type CrowdReportRecord } from "@/lib/observations-repository";
+import PlannerWizard from "./PlannerWizard";
 
 export type Report = {
   id: string | number;
@@ -108,140 +109,9 @@ export type Plan = {
   must: string;
 };
 
-export function Planner({
-  plan,
-  setPlan,
-  onGenerate,
-}: {
-  plan: Plan;
-  setPlan: (p: Plan) => void;
-  onGenerate: () => void;
-}) {
-  const chip = (active: boolean) =>
-    `rounded-full border px-4 py-1.5 text-sm capitalize transition ${
-      active
-        ? "border-primary bg-primary text-primary-foreground shadow"
-        : "border-border bg-card hover:border-primary"
-    }`;
-  return (
-    <div className="arch mx-auto max-w-4xl border-4 border-double border-gold bg-card p-6 pt-14 shadow-xl md:p-10 md:pt-16">
-      <div className="grid gap-6 md:grid-cols-2">
-        <Field label="Travel day">
-          <div className="flex flex-wrap gap-2">
-            {DAYS.map((d) => (
-              <button
-                key={d}
-                className={chip(plan.day === d)}
-                onClick={() => setPlan({ ...plan, day: d })}
-              >
-                {d}
-              </button>
-            ))}
-          </div>
-        </Field>
-        <Field label="Available time">
-          <div className="flex gap-2">
-            <button
-              className={chip(plan.time === "half")}
-              onClick={() => setPlan({ ...plan, time: "half" })}
-            >
-              Half-day
-            </button>
-            <button
-              className={chip(plan.time === "full")}
-              onClick={() => setPlan({ ...plan, time: "full" })}
-            >
-              Full day
-            </button>
-          </div>
-        </Field>
-        <Field label={`Budget: ₹${plan.budget.toLocaleString("en-IN")}`}>
-          <input
-            type="range"
-            min={500}
-            max={6000}
-            step={250}
-            value={plan.budget}
-            onChange={(e) => setPlan({ ...plan, budget: +e.target.value })}
-            className="w-full accent-[var(--primary)]"
-          />
-        </Field>
-        <Field label="Travelling as">
-          <div className="flex flex-wrap gap-2">
-            {["solo", "friends", "couple", "family"].map((t) => (
-              <button
-                key={t}
-                className={chip(plan.type === t)}
-                onClick={() => setPlan({ ...plan, type: t })}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-        </Field>
-        <Field label="Interests">
-          <div className="flex flex-wrap gap-2">
-            {INTERESTS.map((i) => {
-              const on = plan.interests.includes(i);
-              return (
-                <button
-                  key={i}
-                  className={chip(on)}
-                  onClick={() =>
-                    setPlan({
-                      ...plan,
-                      interests: on
-                        ? plan.interests.filter((x) => x !== i)
-                        : [...plan.interests, i],
-                    })
-                  }
-                >
-                  {i}
-                </button>
-              );
-            })}
-          </div>
-        </Field>
-        <Field label="Crowd preference">
-          <div className="flex flex-wrap gap-2">
-            {["avoid", "balanced", "don't mind"].map((c) => (
-              <button
-                key={c}
-                className={chip(plan.crowd === c)}
-                onClick={() => setPlan({ ...plan, crowd: c })}
-              >
-                {c === "avoid" ? "Avoid crowds" : c}
-              </button>
-            ))}
-          </div>
-        </Field>
-        <Field label="Must-visit (optional)">
-          <select
-            value={plan.must}
-            onChange={(e) => setPlan({ ...plan, must: e.target.value })}
-            className="w-full rounded-lg border bg-background px-3 py-2"
-          >
-            <option value="">None</option>
-            {PLACES.filter((p) => !p.gem).map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <div className="flex items-end">
-          <button
-            onClick={onGenerate}
-            className="w-full rounded-full bg-primary px-6 py-3 font-display text-lg text-primary-foreground shadow-lg transition hover:scale-[1.02] hover:bg-saffron"
-          >
-            Plan my Jaipur day →
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+export function Planner({ plan, setPlan, onGenerate }: { plan: Plan; setPlan: (p: Plan) => void; onGenerate: () => void }) {
+  return <PlannerWizard plan={plan} setPlan={setPlan} onGenerate={onGenerate} />;
 }
-
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
