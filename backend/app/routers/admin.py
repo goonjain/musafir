@@ -75,6 +75,32 @@ def moderate_report(
         if reward:
             db.delete(reward)
 
+    # If approved from pending, grant reward respecting daily cap and idempotency
+    elif action.status == "approved" and old_status == "pending":
+        now = datetime.datetime.now(datetime.timezone.utc)
+        one_day_ago = now - datetime.timedelta(hours=24)
+        daily_points = db.query(func.coalesce(func.sum(Reward.points), 0)).filter(
+            Reward.user_id == report.user_id,
+            Reward.created_at >= one_day_ago
+        ).scalar() or 0
+        if daily_points < settings.DAILY_POINTS_CAP:
+            points_to_give = min(settings.POINTS_PER_CHECKIN, settings.DAILY_POINTS_CAP - daily_points)
+            ref_id = f"crowd_report_{report.id}"
+            # Ensure we don't duplicate reward
+            existing = db.query(Reward).filter(
+                Reward.user_id == report.user_id,
+                Reward.reference_id == ref_id
+            ).first()
+            if not existing and points_to_give > 0:
+                reward = Reward(
+                    user_id=report.user_id,
+                    points=points_to_give,
+                    reason=f"Admin approved crowd report {report.id}",
+                    reference_id=ref_id,
+                    created_at=now,
+                )
+                db.add(reward)
+
     db.commit()
     return {
         "success": True,

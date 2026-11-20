@@ -114,7 +114,7 @@ def submit_crowd_report(
         observed_at=observed_time,
         submitted_at=now,
         forecast_score_at_report=baseline_score,
-        moderation_status=mod_status,
+        moderation_status="pending",
         trust_weight=1.0,
         image=payload.image,
     )
@@ -199,8 +199,9 @@ def get_crowd_reports(
     limit: int = 30,
     db: Session = Depends(get_db)
 ):
+    # Public feed should only expose approved reports
     query = db.query(CrowdReport).join(Destination).join(User).filter(
-        CrowdReport.moderation_status != "rejected"
+        CrowdReport.moderation_status == "approved"
     )
     if destination_id:
         query = query.filter(CrowdReport.destination_id == destination_id)
@@ -249,7 +250,7 @@ def get_place_feed(
 
     query = db.query(CrowdReport).filter(
         CrowdReport.destination_id == place_id,
-        CrowdReport.moderation_status != "rejected"
+        CrowdReport.moderation_status == "approved"
     )
 
     if filter_type == "tips":
