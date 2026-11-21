@@ -296,7 +296,7 @@ export function Itinerary({
   return (
     <div className="grid gap-8 lg:grid-cols-[1.4fr_1fr]">
       <div className="rounded-2xl border bg-card p-6 shadow">
-        {!optimized && !hasReplacements && (
+        {!optimized && (
           <div className="mb-5 rounded-xl border-l-4 border-crowd-critical bg-secondary p-4">
             <p className="font-bold">
               ⚠ {must.name} at 4 PM: {mustPred.score}/100 crowd pressure — {mustPred.category}
